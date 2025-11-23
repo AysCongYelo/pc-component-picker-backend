@@ -1,0 +1,32 @@
+🩺 DB Health Check Report — 11/12/2025, 2:20:33 PM
+───────────────────────────────────────
+📦 Total Components: 120
+🖼️ Missing image_url: 0
+📁 Missing image_path: 0
+🚫 Orphaned files: 11
+⚠️ Missing in storage: 39
+───────────────────────────────────────
+
+Sample Orphans:
+cpu/49fca908d8863ded4df790bd3af6bc12.256p.jpg
+cpu/amd_ryzen_5_5500.jpg
+cpu/amd_ryzen_9_9950x.jpg
+gpu/gigabyte_gaming_oc_radeon_rx_9070_xt.jpg
+uploads/1762927082880_amd_ryzen_7_7800x3d.jpg
+uploads/1762927150460_amd_ryzen_7_7800x3d.jpg
+uploads/1762927264816_amd_ryzen_7_7800x3d.jpg
+uploads/1762927611223_amd_ryzen_7_7800x3d.jpg
+uploads/1762927669345_amd_ryzen_7_7800x3d.jpg
+uploads/1762927905206_amd_ryzen_7_7800x3d.jpg
+
+Sample Missing:
+cpu_cooler/corsair_icue_h150i_elite_capellix.jpg
+cpu_cooler/nzxt_kraken_z73.jpg
+cpu_cooler/deepcool_ak620.jpg
+cpu_cooler/arctic_freezer_34_esports_duo.jpg
+cpu_cooler/be_quiet_pure_rock_2.jpg
+gpu/nvidia_geforce_rtx_4070_super.jpg
+gpu/nvidia_geforce_rtx_4060_ti.jpg
+gpu/amd_radeon_rx_7700_xt.jpg
+gpu/amd_radeon_rx_6750_xt.jpg
+gpu/nvidia_geforce_rtx_3060.jpg
