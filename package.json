@@ -13,7 +13,7 @@
     "db:check": "node scripts/maintenance/dbHealthCheck.js",
 
     "storage:upload": "node scripts/tools/uploadAssets.js",
-    "storage:clean": "node scripts/maintenance/cleanStorage.js",
+    "storage:clean": "node scripts/maintenance/cleanStorage.js"
 
   },
   "keywords": [],
