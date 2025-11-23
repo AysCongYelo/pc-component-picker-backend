@@ -1,30 +1,20 @@
 {
   "type": "module",
-  "name": "backend",
+  "name": "pc-component-picker-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend API for PC Component Picker",
+  "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "crud:add": "node scripts/crud/addComponents.js",
-    "crud:update": "node scripts/crud/updateComponents.js",
-    "crud:get": "node scripts/crud/getComponents.js",
-    "crud:delete": "node scripts/crud/deleteComponents.js",
+    "start": "node src/server.js",
+
     "db:seed": "node scripts/seed/runAllSeeds.js",
     "db:clear": "node scripts/maintenance/clearComponents.js",
     "db:check": "node scripts/maintenance/dbHealthCheck.js",
-    "db:reset": "npm run db:clear && npm run db:seed",
-    "db:fullsync": "npm run db:reset && npm run storage:syncall && npm run test:compatibility:all && npm run test:auto-builder",
+
     "storage:upload": "node scripts/tools/uploadAssets.js",
     "storage:clean": "node scripts/maintenance/cleanStorage.js",
-    "storage:checkorphans": "node scripts/maintenance/cleanStorage.js --dry",
-    "storage:syncall": "npm run storage:upload && npm run db:check",
-    "test:compatibility": "node scripts/tools/testCompatibility.js",
-    "test:compatibility:all": "node scripts/tools/testAllCompatibility.js",
-    "test:auto-builder": "node scripts/tools/testAutoBuilder.js",
-    "db:health": "npm run db:check",
-    "storage:verify": "npm run storage:checkorphans",
-    "seed:test": "node scripts/seed/test/runTestSeed.js"
+
   },
   "keywords": [],
   "author": "",
