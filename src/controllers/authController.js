@@ -116,12 +116,6 @@ export const refreshToken = async (req, res) => {
 ============================================================================ */
 export const logout = async (req, res) => {
   try {
-    let token = req.headers.authorization?.split(" ")[1];
-
-    if (!token) return res.status(401).json({ error: "Missing token" });
-
-    await supabaseAdmin.auth.signOut(token);
-
     return res.json({ success: true });
   } catch (err) {
     return res.status(400).json({ error: err.message });

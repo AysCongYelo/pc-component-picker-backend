@@ -1,24 +1,14 @@
 // src/middleware/authMiddleware.js
-// -----------------------------------------------------------------------------
-// AUTH MIDDLEWARE
-// Handles: JWT verification via Supabase, attaches user info to req.user,
-// and optional admin role enforcement.
-// -----------------------------------------------------------------------------
-
-import { supabaseAdmin } from "../supabaseAdmin.js";
+import { supabase } from "../services/supabaseClient.js";
 import pool from "../db.js";
 
 /* ============================================================================
    AUTH — VERIFY USER TOKEN
 ============================================================================ */
 
-/**
- * Middleware: Validate Bearer token using Supabase auth
- * and attach authenticated user info to req.user.
- */
 export async function requireAuth(req, res, next) {
   try {
-    // Extract Authorization token
+    // Extract token
     let token =
       req.headers.authorization ||
       req.headers.Authorization ||
@@ -35,8 +25,8 @@ export async function requireAuth(req, res, next) {
       });
     }
 
-    // Verify token with Supabase Admin API
-    const { data, error } = await supabaseAdmin.auth.getUser(token);
+    // Verify token via Supabase
+    const { data, error } = await supabase.auth.getUser(token);
 
     if (error || !data?.user) {
       return res.status(401).json({
@@ -47,16 +37,15 @@ export async function requireAuth(req, res, next) {
 
     const authUser = data.user;
 
-    // Load role from database
-    const { rows } = await pool.query(
-      `SELECT role FROM profiles WHERE id = $1 LIMIT 1`,
-      [authUser.id]
-    );
+    // Load role from profiles table
+    const result = await pool.query(`SELECT role FROM profiles WHERE id = $1`, [
+      authUser.id,
+    ]);
 
     req.user = {
       id: authUser.id,
       email: authUser.email,
-      role: rows?.[0]?.role || "user",
+      role: result.rows?.[0]?.role || "user",
     };
 
     return next();
@@ -70,9 +59,6 @@ export async function requireAuth(req, res, next) {
    AUTH — REQUIRE ADMIN
 ============================================================================ */
 
-/**
- * Middleware: Check if authenticated user has admin role.
- */
 export async function requireAdmin(req, res, next) {
   try {
     if (!req.user?.role) {
