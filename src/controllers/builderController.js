@@ -436,27 +436,26 @@ export const autoBuild = async (req, res) => {
 
     const temp = await BuilderModel.getTempBuild(req.user.id);
 
-    // keep source build id if editing saved build
     const sourceId = temp.components.__source_build_id || null;
 
-    const built = await AutoBuilder.buildFromPurpose({ purpose, budget });
+    const built = await AutoBuilder.buildFromPurpose({
+      purpose,
+      budget,
+      respectCpu: null,
+    });
 
-    // save to temp (with marker)
     await BuilderModel.upsertTempBuild(req.user.id, {
       ...built,
       ...(sourceId ? { __source_build_id: sourceId } : {}),
     });
 
-    // separate marker
     const { __source_build_id, ...componentOnly } = {
       ...built,
       ...(sourceId ? { __source_build_id: sourceId } : {}),
     };
 
-    // expand real components only
     const detailed = await BuilderModel.expandComponents(componentOnly);
 
-    // reattach marker cleanly
     if (sourceId) detailed.__source_build_id = sourceId;
 
     const summary = BuilderModel.buildSummary(detailed);

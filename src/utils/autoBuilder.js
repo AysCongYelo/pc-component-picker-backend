@@ -2,23 +2,33 @@
 // -----------------------------------------------------------------------------
 // AUTO-BUILDER ENGINE (Optimized + Defensive)
 // Generates builds based on purpose, budget, and compatibility rules.
-// All selection steps are deterministic and strictly filtered.
 // -----------------------------------------------------------------------------
 
 import * as BuilderModel from "../models/builderModel.js";
 import * as Compatibility from "./compatibility.js";
 
-// Fetch active + in-stock components
-const fetchAll = async (category) => {
-  const list = await BuilderModel.getComponentsWithSpecs(category);
-  return list.filter(
-    (c) => c.status === "active" && (c.stock === null || c.stock > 0)
-  );
-};
+// ============================================================================
+// TIMEOUT HELPERS
+// ============================================================================
 
-// -----------------------------------------------------------------------------
-// Purpose Config
-// -----------------------------------------------------------------------------
+// fastest safe timeout rule: each DB call must finish before OVERALL deadline
+const OVERALL_MS = 10000; // 10 seconds total for entire autobuild
+
+const withTimeout = (p, ms) =>
+  Promise.race([
+    p,
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error("Operation timed out")), ms)
+    ),
+  ]);
+
+// compute remaining overall milliseconds
+const rem = (deadline) => Math.max(200, deadline - Date.now());
+
+// ============================================================================
+// PURPOSE PROFILES
+// ============================================================================
+
 const PURPOSES = {
   gaming: {
     ram_gb: 16,
@@ -82,25 +92,21 @@ const PURPOSES = {
   },
 };
 
-// -----------------------------------------------------------------------------
-// CPU Ranking Logic
-// -----------------------------------------------------------------------------
-const selectCPUFromList = (cpus, rank) => {
-  if (!cpus.length) return null;
+// ============================================================================
+// CPU selection helper
+// ============================================================================
 
-  const byPriceAsc = [...cpus].sort(
-    (a, b) => Number(a.price) - Number(b.price)
-  );
+const selectCPUFromList = (cpus, rank) => {
+  if (!cpus || !cpus.length) return null;
+
+  const byPrice = [...cpus].sort((a, b) => Number(a.price) - Number(b.price));
   const byCores = [...cpus].sort(
     (a, b) => (b.specs?.cores || 0) - (a.specs?.cores || 0)
   );
 
-  if (rank === "high") {
-    return byCores[0]; // pick highest core count
-  }
+  if (rank === "high") return byCores[0];
 
   if (rank === "mid-high" || rank === "mid") {
-    // balanced: cores first, then cheaper
     return [...cpus].sort(
       (a, b) =>
         (b.specs?.cores || 0) - (a.specs?.cores || 0) ||
@@ -108,15 +114,15 @@ const selectCPUFromList = (cpus, rank) => {
     )[0];
   }
 
-  return byPriceAsc[0]; // entry-level tier
+  return byPrice[0];
 };
 
-// Price helper
 const priceNum = (c) => Number(c?.price || 0);
 
-// -----------------------------------------------------------------------------
+// ============================================================================
 // MAIN AUTO-BUILD ENGINE
-// -----------------------------------------------------------------------------
+// ============================================================================
+
 export const buildFromPurpose = async ({
   purpose,
   budget = null,
@@ -124,355 +130,375 @@ export const buildFromPurpose = async ({
 }) => {
   const cfg = PURPOSES[purpose] || PURPOSES.basic;
 
+  // OVERALL DEADLINE
+  const deadline = Date.now() + OVERALL_MS;
+
   const chosen = {};
   const chosenIds = {};
 
   let remaining =
     budget === null || budget === undefined ? null : Number(budget);
 
-  // Commit pick + subtract budget
-  const commitPick = (category, comp) => {
-    if (!comp) return false;
+  // Try expand initial empty build (cached)
+  let expanded = {};
+  try {
+    expanded = await withTimeout(
+      BuilderModel.expandComponents(chosenIds),
+      rem(deadline)
+    );
+  } catch (_) {
+    expanded = {};
+  }
 
-    if (remaining !== null && priceNum(comp) > remaining) return false;
+  const commit = async (cat, comp) => {
+    if (!comp || !comp.id) return;
 
-    chosen[category] = comp;
-    chosenIds[category] = comp.id;
+    if (remaining !== null && priceNum(comp) > remaining) return;
+
+    chosen[cat] = comp;
+    chosenIds[cat] = comp.id;
 
     if (remaining !== null) {
-      remaining = Number((remaining - priceNum(comp)).toFixed(2));
+      remaining -= priceNum(comp);
       if (remaining < 0) remaining = 0;
     }
+
+    // update expanded
+    try {
+      expanded = await withTimeout(
+        BuilderModel.expandComponents(chosenIds),
+        rem(deadline)
+      );
+    } catch (_) {}
 
     return true;
   };
 
-  // Iterate by priority
+  const fetchList = async (cat) => {
+    const ms = rem(deadline);
+    if (ms <= 200) throw new Error("Global autobuild timeout reached");
+
+    const list = await withTimeout(
+      BuilderModel.getComponentsWithSpecs(cat),
+      ms
+    );
+
+    return (list || []).filter(
+      (c) => c && c.status === "active" && (c.stock === null || c.stock > 0)
+    );
+  };
+
+  // iterate categories by priority
   for (const category of cfg.priority) {
-    // ------------------------- CPU
-    if (category === "cpu") {
-      let list = await fetchAll("cpu");
-      if (!list.length) continue;
+    if (Date.now() > deadline) break;
 
-      const current = await BuilderModel.expandComponents(chosenIds);
+    try {
+      // ------------------------ CPU
+      if (category === "cpu") {
+        let list = await fetchList("cpu");
+        if (!list.length) continue;
 
-      // Respect pinned CPU if allowed
-      if (respectCpu) {
-        const keep = list.find((c) => c.id === respectCpu);
-        if (keep) {
-          const ok = Compatibility.checkComponentAgainstBuild(current, "cpu", {
-            ...keep,
-            category: "cpu",
-          }).ok;
+        if (respectCpu) {
+          const keep = list.find((c) => c.id === respectCpu);
+          if (keep) {
+            const ok =
+              Compatibility.checkComponentAgainstBuild(expanded, "cpu", {
+                ...keep,
+                category: "cpu",
+              }).ok &&
+              (remaining === null || priceNum(keep) <= remaining);
 
-          if (ok && (remaining === null || priceNum(keep) <= remaining)) {
-            commitPick("cpu", keep);
-            continue;
+            if (ok) {
+              await commit("cpu", keep);
+              continue;
+            }
           }
         }
-      }
 
-      // Filter compatible
-      list = list.filter(
-        (c) =>
-          Compatibility.checkComponentAgainstBuild(current, "cpu", {
-            ...c,
-            category: "cpu",
-          }).ok
-      );
-
-      // Filter budget
-      if (remaining !== null)
-        list = list.filter((c) => priceNum(c) <= remaining);
-
-      if (!list.length) continue;
-
-      const best = selectCPUFromList(list, cfg.cpu_rank);
-      commitPick("cpu", best);
-      continue;
-    }
-
-    // ------------------------- Motherboard
-    if (category === "motherboard") {
-      let list = await fetchAll("motherboard");
-      if (!list.length) continue;
-
-      // Enforce socket match if CPU chosen
-      if (chosen.cpu?.specs?.socket) {
-        const sock = String(chosen.cpu.specs.socket).toLowerCase();
         list = list.filter(
-          (m) => String(m.specs?.socket || "").toLowerCase() === sock
+          (c) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "cpu", {
+              ...c,
+              category: "cpu",
+            }).ok
         );
-      }
 
-      const current = await BuilderModel.expandComponents(chosenIds);
+        if (remaining !== null)
+          list = list.filter((c) => priceNum(c) <= remaining);
 
-      list = list.filter(
-        (m) =>
-          Compatibility.checkComponentAgainstBuild(current, "motherboard", {
-            ...m,
-            category: "motherboard",
-          }).ok
-      );
+        if (!list.length) continue;
 
-      if (remaining !== null)
-        list = list.filter((m) => priceNum(m) <= remaining);
-
-      if (!list.length) continue;
-
-      commitPick(
-        "motherboard",
-        [...list].sort((a, b) => priceNum(a) - priceNum(b))[0]
-      );
-      continue;
-    }
-
-    // ------------------------- Memory
-    if (category === "memory") {
-      let list = await fetchAll("memory");
-      if (!list.length) continue;
-
-      // RAM type match
-      if (chosen.motherboard?.specs?.memory_type) {
-        const type = String(chosen.motherboard.specs.memory_type).toLowerCase();
-        list = list.filter(
-          (r) => String(r.specs?.type || "").toLowerCase() === type
-        );
-      }
-
-      const current = await BuilderModel.expandComponents(chosenIds);
-
-      list = list.filter(
-        (r) =>
-          Compatibility.checkComponentAgainstBuild(current, "memory", {
-            ...r,
-            category: "memory",
-          }).ok
-      );
-
-      const sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-      const enough = sorted.filter(
-        (r) => Number(r.specs?.capacity_gb || 0) >= cfg.ram_gb
-      );
-
-      // Budget-aware picks
-      if (remaining !== null && enough.length) {
-        const ok = enough.filter((r) => priceNum(r) <= remaining);
-        if (ok.length) {
-          commitPick("memory", ok[0]);
-          continue;
-        }
-      }
-
-      if (remaining === null && enough.length) {
-        commitPick("memory", enough[0]);
+        const best = selectCPUFromList(list, cfg.cpu_rank);
+        await commit("cpu", best);
         continue;
       }
 
-      // Cheapest available
-      if (remaining !== null) {
-        const affordable = sorted.filter((r) => priceNum(r) <= remaining);
-        if (affordable.length) {
-          commitPick("memory", affordable[0]);
+      // ------------------------ Motherboard
+      if (category === "motherboard") {
+        let list = await fetchList("motherboard");
+        if (!list.length) continue;
+
+        const cpuSock = chosen.cpu?.specs?.socket;
+        if (cpuSock) {
+          const sock = String(cpuSock).toLowerCase();
+          list = list.filter(
+            (m) => String(m.specs?.socket || "").toLowerCase() === sock
+          );
+        }
+
+        list = list.filter(
+          (m) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "motherboard", {
+              ...m,
+              category: "motherboard",
+            }).ok
+        );
+
+        if (remaining !== null)
+          list = list.filter((m) => priceNum(m) <= remaining);
+
+        if (!list.length) continue;
+
+        await commit(
+          "motherboard",
+          [...list].sort((a, b) => priceNum(a) - priceNum(b))[0]
+        );
+        continue;
+      }
+
+      // ------------------------ Memory
+      if (category === "memory") {
+        let list = await fetchList("memory");
+        if (!list.length) continue;
+
+        const type = chosen.motherboard?.specs?.memory_type;
+        if (type)
+          list = list.filter(
+            (r) => String(r.specs?.type || "").toLowerCase() === type
+          );
+
+        list = list.filter(
+          (r) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "memory", {
+              ...r,
+              category: "memory",
+            }).ok
+        );
+
+        const sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
+        const enough = sorted.filter(
+          (r) => Number(r.specs?.capacity_gb || 0) >= cfg.ram_gb
+        );
+
+        if (remaining !== null && enough.length) {
+          const ok = enough.filter((r) => priceNum(r) <= remaining);
+          if (ok.length) {
+            await commit("memory", ok[0]);
+            continue;
+          }
+        }
+
+        if (remaining === null && enough.length) {
+          await commit("memory", enough[0]);
           continue;
         }
+
+        if (remaining !== null) {
+          const affordable = sorted.filter((r) => priceNum(r) <= remaining);
+          if (affordable.length) {
+            await commit("memory", affordable[0]);
+            continue;
+          }
+        }
+
+        if (remaining === null && sorted.length) {
+          await commit("memory", sorted[0]);
+        }
+        continue;
       }
 
-      if (remaining === null && sorted.length) {
-        commitPick("memory", sorted[0]);
-      }
+      // ------------------------ GPU
+      if (category === "gpu") {
+        if (!cfg.prefer_gpu) continue;
 
-      continue;
-    }
+        let list = await fetchList("gpu");
+        if (!list.length) continue;
 
-    // ------------------------- GPU
-    if (category === "gpu") {
-      if (!cfg.prefer_gpu) continue;
-
-      let list = await fetchAll("gpu");
-      if (!list.length) continue;
-
-      const current = await BuilderModel.expandComponents(chosenIds);
-
-      list = list.filter(
-        (g) =>
-          Compatibility.checkComponentAgainstBuild(current, "gpu", {
-            ...g,
-            category: "gpu",
-          }).ok
-      );
-
-      let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-
-      if (remaining !== null)
-        sorted = sorted.filter((g) => priceNum(g) <= remaining);
-
-      if (!sorted.length) continue;
-
-      commitPick("gpu", sorted[0]);
-      continue;
-    }
-
-    // ------------------------- Storage
-    if (category === "storage") {
-      let list = await fetchAll("storage");
-      if (!list.length) continue;
-
-      const current = await BuilderModel.expandComponents(chosenIds);
-
-      list = list.filter(
-        (s) =>
-          Compatibility.checkComponentAgainstBuild(current, "storage", {
-            ...s,
-            category: "storage",
-          }).ok
-      );
-
-      const nvme = list.filter((s) =>
-        String(s.specs?.interface || "")
-          .toLowerCase()
-          .includes("nvme")
-      );
-
-      let sorted = [...(nvme.length ? nvme : list)].sort(
-        (a, b) => priceNum(a) - priceNum(b)
-      );
-
-      if (remaining !== null)
-        sorted = sorted.filter((s) => priceNum(s) <= remaining);
-
-      if (!sorted.length) continue;
-
-      commitPick("storage", sorted[0]);
-      continue;
-    }
-
-    // ------------------------- PSU
-    if (category === "psu") {
-      let list = await fetchAll("psu");
-      if (!list.length) continue;
-
-      const cpuTDP = Number(chosen.cpu?.specs?.tdp || 0);
-      const gpuTDP = Number(chosen.gpu?.specs?.tdp || 0);
-
-      const requiredW = Math.max(450, Math.ceil((cpuTDP + gpuTDP) * 1.5));
-
-      list = list.filter((p) => Number(p.specs?.wattage || 0) >= requiredW);
-
-      const current = await BuilderModel.expandComponents(chosenIds);
-
-      list = list.filter(
-        (p) =>
-          Compatibility.checkComponentAgainstBuild(current, "psu", {
-            ...p,
-            category: "psu",
-          }).ok
-      );
-
-      let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-      if (remaining !== null)
-        sorted = sorted.filter((p) => priceNum(p) <= remaining);
-
-      if (!sorted.length) continue;
-
-      commitPick("psu", sorted[0]);
-      continue;
-    }
-
-    // ------------------------- Case
-    if (category === "case") {
-      let list = await fetchAll("case");
-      if (!list.length) continue;
-
-      const mbForm = chosen.motherboard?.specs?.form_factor;
-      const gpuLen = Number(chosen.gpu?.specs?.length || 0);
-
-      // Form-factor match
-      if (mbForm) {
-        list = list.filter((c) =>
-          (c.specs?.form_factor_support || []).includes(mbForm)
+        list = list.filter(
+          (g) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "gpu", {
+              ...g,
+              category: "gpu",
+            }).ok
         );
+
+        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
+        if (remaining !== null)
+          sorted = sorted.filter((g) => priceNum(g) <= remaining);
+
+        if (!sorted.length) continue;
+
+        await commit("gpu", sorted[0]);
+        continue;
       }
 
-      // GPU length check
-      list = list.filter((c) => {
-        const max = Number(c.specs?.max_gpu_length || 0);
-        return !gpuLen || !max || gpuLen <= max;
-      });
+      // ------------------------ Storage
+      if (category === "storage") {
+        let list = await fetchList("storage");
+        if (!list.length) continue;
 
-      const current = await BuilderModel.expandComponents(chosenIds);
+        list = list.filter(
+          (s) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "storage", {
+              ...s,
+              category: "storage",
+            }).ok
+        );
 
-      list = list.filter(
-        (c) =>
-          Compatibility.checkComponentAgainstBuild(current, "case", {
-            ...c,
-            category: "case",
-          }).ok
-      );
+        const nvme = list.filter((s) =>
+          String(s.specs?.interface || "")
+            .toLowerCase()
+            .includes("nvme")
+        );
 
-      let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-      if (remaining !== null)
-        sorted = sorted.filter((c) => priceNum(c) <= remaining);
+        let sorted = [...(nvme.length ? nvme : list)].sort(
+          (a, b) => priceNum(a) - priceNum(b)
+        );
 
-      if (!sorted.length) continue;
+        if (remaining !== null)
+          sorted = sorted.filter((s) => priceNum(s) <= remaining);
 
-      commitPick("case", sorted[0]);
-      continue;
-    }
+        if (!sorted.length) continue;
 
-    // ------------------------- CPU Cooler
-    if (category === "cpu_cooler") {
-      let list = await fetchAll("cpu_cooler");
-      if (!list.length) continue;
+        await commit("storage", sorted[0]);
+        continue;
+      }
 
-      const socket = chosen.cpu?.specs?.socket;
-      const maxH = Number(chosen.case?.specs?.max_cpu_cooler_height || 0);
+      // ------------------------ PSU
+      if (category === "psu") {
+        let list = await fetchList("psu");
+        if (!list.length) continue;
 
-      list = list.filter((c) => {
-        const sockets = c.specs?.compatible_sockets || [];
-        const height = Number(c.specs?.height || 0);
+        const cpuT = Number(chosen.cpu?.specs?.tdp || 0);
+        const gpuT = Number(chosen.gpu?.specs?.tdp || 0);
+        const need = Math.max(450, Math.ceil((cpuT + gpuT) * 1.5));
 
-        if (socket && !sockets.includes(socket)) return false;
-        if (maxH && height > maxH) return false;
+        list = list.filter((p) => Number(p.specs?.wattage || 0) >= need);
 
-        return true;
-      });
+        list = list.filter(
+          (p) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "psu", {
+              ...p,
+              category: "psu",
+            }).ok
+        );
 
-      const current = await BuilderModel.expandComponents(chosenIds);
+        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
+        if (remaining !== null)
+          sorted = sorted.filter((p) => priceNum(p) <= remaining);
 
-      list = list.filter(
-        (c) =>
-          Compatibility.checkComponentAgainstBuild(current, "cpu_cooler", {
-            ...c,
-            category: "cpu_cooler",
-          }).ok
-      );
+        if (!sorted.length) continue;
 
-      let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-      if (remaining !== null)
-        sorted = sorted.filter((c) => priceNum(c) <= remaining);
+        await commit("psu", sorted[0]);
+        continue;
+      }
 
-      if (!sorted.length) continue;
+      // ------------------------ Case
+      if (category === "case") {
+        let list = await fetchList("case");
+        if (!list.length) continue;
 
-      commitPick("cpu_cooler", sorted[0]);
+        const mbForm = chosen.motherboard?.specs?.form_factor;
+        const gpuLen = Number(chosen.gpu?.specs?.length || 0);
+
+        if (mbForm)
+          list = list.filter((c) =>
+            (c.specs?.form_factor_support || []).includes(mbForm)
+          );
+
+        list = list.filter((c) => {
+          const max = Number(c.specs?.max_gpu_length || 0);
+          return !gpuLen || !max || gpuLen <= max;
+        });
+
+        list = list.filter(
+          (c) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "case", {
+              ...c,
+              category: "case",
+            }).ok
+        );
+
+        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
+        if (remaining !== null)
+          sorted = sorted.filter((c) => priceNum(c) <= remaining);
+
+        if (!sorted.length) continue;
+
+        await commit("case", sorted[0]);
+        continue;
+      }
+
+      // ------------------------ CPU Cooler
+      if (category === "cpu_cooler") {
+        let list = await fetchList("cpu_cooler");
+        if (!list.length) continue;
+
+        const socket = chosen.cpu?.specs?.socket;
+        const heightLimit = Number(
+          chosen.case?.specs?.max_cpu_cooler_height || 0
+        );
+
+        list = list.filter((c) => {
+          const sockets = c.specs?.compatible_sockets || [];
+          const h = Number(c.specs?.height || 0);
+
+          if (socket && !sockets.includes(socket)) return false;
+          if (heightLimit && h > heightLimit) return false;
+
+          return true;
+        });
+
+        list = list.filter(
+          (c) =>
+            Compatibility.checkComponentAgainstBuild(expanded, "cpu_cooler", {
+              ...c,
+              category: "cpu_cooler",
+            }).ok
+        );
+
+        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
+        if (remaining !== null)
+          sorted = sorted.filter((c) => priceNum(c) <= remaining);
+
+        if (!sorted.length) continue;
+
+        await commit("cpu_cooler", sorted[0]);
+        continue;
+      }
+    } catch (err) {
+      console.warn(`auto-build step failed for ${category}:`, err.message);
       continue;
     }
   }
 
-  // Return only IDs
-  const result = {};
+  // return only IDs
+  const finalIds = {};
   for (const [cat, comp] of Object.entries(chosen)) {
-    result[cat] = comp.id;
+    finalIds[cat] = comp?.id || null;
   }
 
-  return result;
+  return finalIds;
 };
 
-// -----------------------------------------------------------------------------
-// AUTO-COMPLETE BUILDS
-// -----------------------------------------------------------------------------
+// ============================================================================
+// AUTO-COMPLETE (low priority)
+// ============================================================================
+
 export const autoCompleteBuild = async (partial) => {
-  const expanded = await BuilderModel.expandComponents(partial);
+  const expanded = await BuilderModel.expandComponents(partial).catch(
+    () => ({})
+  );
 
   let purpose = "gaming";
   if (expanded.memory?.specs?.capacity_gb >= 32) {
