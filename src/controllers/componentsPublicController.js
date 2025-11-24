@@ -1,6 +1,8 @@
-// src/controllers/publicComponentsController.js
 import { supabase } from "../services/supabaseClient.js";
 
+/* ================================
+   PUBLIC LIST COMPONENTS
+================================ */
 export async function publicListComponents(req, res) {
   try {
     const { search, category, min_price, max_price } = req.query;
@@ -29,6 +31,9 @@ export async function publicListComponents(req, res) {
   }
 }
 
+/* ================================
+   PUBLIC GET ONE COMPONENT
+================================ */
 export async function publicGetComponent(req, res) {
   try {
     const id = req.params.id;
@@ -43,7 +48,28 @@ export async function publicGetComponent(req, res) {
     if (error || !data)
       return res.status(404).json({ error: "Component not found" });
 
+    // INCREMENT VIEWS
     await supabase.rpc("increment_component_views", { comp_id: id });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+/* ================================
+   PUBLIC TRENDING COMPONENTS
+================================ */
+export async function publicGetTrending(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from("components")
+      .select("id, name, brand, price, image_url, category_id, views")
+      .eq("status", "active")
+      .order("views", { ascending: false })
+      .limit(10);
+
+    if (error) throw error;
 
     return res.json({ success: true, data });
   } catch (err) {

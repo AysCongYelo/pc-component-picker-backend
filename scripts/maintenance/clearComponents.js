@@ -22,7 +22,6 @@ function askQuestion(query) {
  */
 async function deleteAllFromTable(tableName) {
   try {
-    // First, get count
     const { count: beforeCount } = await supabase
       .from(tableName)
       .select("*", { count: "exact", head: true });
@@ -32,7 +31,6 @@ async function deleteAllFromTable(tableName) {
       return 0;
     }
 
-    // Delete in batches to avoid timeouts
     const BATCH_SIZE = 1000;
     let totalDeleted = 0;
 
@@ -97,7 +95,6 @@ async function clearComponents() {
   console.log("🧹 PC Component Picker — Clear Components Tool");
   console.log("══════════════════════════════════════════════\n");
 
-  // 🧱 Prevent accidental production wipes
   if (process.env.NODE_ENV === "production") {
     console.error("🚫 Not allowed in production environment. Exiting...");
     process.exit(1);
@@ -129,38 +126,34 @@ async function clearComponents() {
 
   // 🧩 Menu
   console.log("Choose cleanup mode:");
-  console.log("1️⃣  Delete ALL components + specs + rules");
+  console.log("1️⃣  Delete ALL components + specs");
   console.log("2️⃣  Delete by CATEGORY");
   console.log("3️⃣  Delete MULTIPLE categories");
-  console.log("4️⃣  Delete ONLY specs (keep components)");
-  console.log("5️⃣  Delete ONLY compatibility rules\n");
+  console.log("4️⃣  Delete ONLY specs (keep components)\n");
 
-  const mode = await askQuestion("👉 Enter your choice (1–5): ");
+  const mode = await askQuestion("👉 Enter your choice (1–4): ");
 
   try {
     switch (mode) {
       // =====================================================
-      // 1️⃣ DELETE ALL COMPONENTS + SPECS + RULES
+      // 1️⃣ DELETE ALL COMPONENTS + SPECS
       // =====================================================
       case "1": {
         console.log(
-          "\n⚠️ This will permanently delete ALL components, specs, and compatibility rules."
+          "\n⚠️ This will permanently delete ALL components and specs."
         );
         const confirm = await askQuestion("Type 'confirm' to proceed: ");
         if (confirm !== "confirm") return console.log("❌ Cancelled.");
 
         console.log("\n🗑️ Step 1: Clearing all specs tables...");
-        for (const [category, table] of Object.entries(specsTables)) {
+        for (const table of Object.values(specsTables)) {
           await deleteAllFromTable(table);
         }
 
         console.log("\n🗑️ Step 2: Clearing all components...");
         await deleteAllFromTable("components");
 
-        console.log("\n🗑️ Step 3: Clearing compatibility rules...");
-        await deleteAllFromTable("compatibility_rules");
-
-        console.log("\n✅ All components, specs, and rules cleared.\n");
+        console.log("\n✅ All components and specs cleared.\n");
         break;
       }
 
@@ -186,7 +179,6 @@ async function clearComponents() {
 
         console.log(`\n🗑️ Clearing "${categorySlug}"...`);
 
-        // Get all component IDs for this category
         const { data: components } = await supabase
           .from("components")
           .select("id")
@@ -194,13 +186,11 @@ async function clearComponents() {
 
         const componentIds = (components || []).map((c) => c.id);
 
-        // Clear specs first
         const specsTable = specsTables[categorySlug];
         if (specsTable && componentIds.length > 0) {
           await deleteSpecsByComponentIds(specsTable, componentIds);
         }
 
-        // Then clear components
         if (componentIds.length > 0) {
           const { error: delErr } = await supabase
             .from("components")
@@ -208,6 +198,7 @@ async function clearComponents() {
             .in("id", componentIds);
 
           if (delErr) throw delErr;
+
           console.log(
             `✅ Cleared ${componentIds.length} "${categorySlug}" components.`
           );
@@ -260,7 +251,6 @@ async function clearComponents() {
             continue;
           }
 
-          // Get component IDs
           const { data: components } = await supabase
             .from("components")
             .select("id")
@@ -268,13 +258,11 @@ async function clearComponents() {
 
           const componentIds = (components || []).map((c) => c.id);
 
-          // Clear specs
           const specsTable = specsTables[slug];
           if (specsTable && componentIds.length > 0) {
             await deleteSpecsByComponentIds(specsTable, componentIds);
           }
 
-          // Clear components
           if (componentIds.length > 0) {
             const { error: delErr } = await supabase
               .from("components")
@@ -298,7 +286,7 @@ async function clearComponents() {
       }
 
       // =====================================================
-      // 4️⃣ DELETE ONLY SPECS (KEEP COMPONENTS)
+      // 4️⃣ DELETE ONLY SPECS
       // =====================================================
       case "4": {
         const confirm = await askQuestion(
@@ -307,7 +295,7 @@ async function clearComponents() {
         if (confirm !== "y") return console.log("❌ Cancelled.");
 
         console.log("\n🗑️ Clearing all specs tables...");
-        for (const [category, table] of Object.entries(specsTables)) {
+        for (const table of Object.values(specsTables)) {
           await deleteAllFromTable(table);
         }
 
@@ -315,24 +303,8 @@ async function clearComponents() {
         break;
       }
 
-      // =====================================================
-      // 5️⃣ DELETE ONLY COMPATIBILITY RULES
-      // =====================================================
-      case "5": {
-        const confirm = await askQuestion(
-          "⚠️ Delete ALL compatibility rules? (y/n): "
-        );
-        if (confirm !== "y") return console.log("❌ Cancelled.");
-
-        console.log("\n🗑️ Clearing compatibility rules...");
-        await deleteAllFromTable("compatibility_rules");
-
-        console.log("\n🎉 Compatibility rules cleared successfully!\n");
-        break;
-      }
-
       default:
-        console.log("⚠️ Invalid choice. Please enter 1–5.");
+        console.log("⚠️ Invalid choice. Please enter 1–4.");
         break;
     }
 
