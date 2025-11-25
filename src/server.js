@@ -34,8 +34,8 @@ app.get("/", (req, res) => res.send("API is running."));
       res.status(500).json({ error: "Internal Server Error" });
     });
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running at http://192.168.1.4:${PORT}`);
     });
   } catch (err) {
     console.error("Route registration failed:", err);
