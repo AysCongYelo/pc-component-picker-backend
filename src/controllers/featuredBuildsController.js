@@ -1,10 +1,36 @@
 import { supabaseAdmin as supabase } from "../supabaseAdmin.js";
+import { v4 as uuidv4 } from "uuid";
 
-/* ============================================================================
-   HELPERS
+/* ============================================================================ 
+   HELPERS 
 ============================================================================ */
 
-/** Compute total price based on items with components.price */
+/** Upload to Supabase Storage */
+async function uploadImage(file) {
+  if (!file) return { image_url: null, image_path: null };
+
+  const ext = file.originalname.split(".").pop();
+  const filename = `${uuidv4()}.${ext}`;
+  const path = `featured_builds/${filename}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("featured_builds")
+    .upload(path, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from("featured_builds").getPublicUrl(path);
+
+  return {
+    image_url: data.publicUrl,
+    image_path: path,
+  };
+}
+
+/** Compute total price */
 async function computeTotal(buildId) {
   const { data: items } = await supabase
     .from("featured_build_items")
@@ -19,7 +45,7 @@ async function computeTotal(buildId) {
   }, 0);
 }
 
-/** Expand components for public view */
+/** Expand items */
 async function expandItems(buildId) {
   const { data: items } = await supabase
     .from("featured_build_items")
@@ -29,8 +55,8 @@ async function expandItems(buildId) {
   return items || [];
 }
 
-/* ============================================================================
-   PUBLIC — GET ALL FEATURED BUILDS
+/* ============================================================================ 
+   PUBLIC — GET ALL FEATURED BUILDS 
 ============================================================================ */
 
 export const getFeaturedBuildsPublic = async (req, res) => {
@@ -44,13 +70,12 @@ export const getFeaturedBuildsPublic = async (req, res) => {
 
     return res.json({ success: true, data: builds });
   } catch (err) {
-    console.error("getFeaturedBuildsPublic:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   PUBLIC — GET SINGLE FEATURED BUILD
+/* ============================================================================ 
+   PUBLIC — GET SINGLE FEATURED BUILD 
 ============================================================================ */
 
 export const getFeaturedBuildPublic = async (req, res) => {
@@ -74,21 +99,22 @@ export const getFeaturedBuildPublic = async (req, res) => {
       data: { ...build, items },
     });
   } catch (err) {
-    console.error("getFeaturedBuildPublic:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   ADMIN — CREATE FEATURED BUILD
+/* ============================================================================ 
+   ADMIN — CREATE 
 ============================================================================ */
 
 export const adminCreateFeaturedBuild = async (req, res) => {
   try {
-    const { title, description, image_url } = req.body;
+    const { title, description } = req.body;
 
     if (!title)
       return res.status(400).json({ success: false, error: "title required" });
+
+    const { image_url, image_path } = await uploadImage(req.file);
 
     const { data: created, error } = await supabase
       .from("featured_builds")
@@ -96,6 +122,7 @@ export const adminCreateFeaturedBuild = async (req, res) => {
         title,
         description,
         image_url,
+        image_path,
         total_price: 0,
       })
       .select()
@@ -105,26 +132,40 @@ export const adminCreateFeaturedBuild = async (req, res) => {
 
     return res.json({ success: true, data: created });
   } catch (err) {
-    console.error("adminCreateFeaturedBuild:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   ADMIN — UPDATE FEATURED BUILD (MAIN DATA)
+/* ============================================================================ 
+   ADMIN — UPDATE 
 ============================================================================ */
 
 export const adminUpdateFeaturedBuild = async (req, res) => {
   try {
     const id = req.params.id;
-    const { title, description, image_url } = req.body;
+    const { title, description } = req.body;
+
+    const { data: old } = await supabase
+      .from("featured_builds")
+      .select("image_path")
+      .eq("id", id)
+      .maybeSingle();
+
+    let imageData = {};
+    if (req.file) {
+      if (old?.image_path) {
+        await supabase.storage.from("featured_builds").remove([old.image_path]);
+      }
+
+      imageData = await uploadImage(req.file);
+    }
 
     const { data: updated, error } = await supabase
       .from("featured_builds")
       .update({
         title,
         description,
-        image_url,
+        ...imageData,
       })
       .eq("id", id)
       .select()
@@ -134,20 +175,18 @@ export const adminUpdateFeaturedBuild = async (req, res) => {
 
     return res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("adminUpdateFeaturedBuild:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   ADMIN — DELETE FEATURED BUILD
+/* ============================================================================ 
+   ADMIN — DELETE 
 ============================================================================ */
 
 export const adminDeleteFeaturedBuild = async (req, res) => {
   try {
     const id = req.params.id;
 
-    // items auto-delete via FK cascade
     const { error } = await supabase
       .from("featured_builds")
       .delete()
@@ -157,13 +196,12 @@ export const adminDeleteFeaturedBuild = async (req, res) => {
 
     return res.json({ success: true });
   } catch (err) {
-    console.error("adminDeleteFeaturedBuild:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   ADMIN — SET ITEMS (REPLACE ALL)
+/* ============================================================================ 
+   ADMIN — SET ITEMS 
 ============================================================================ */
 
 export const adminSetFeaturedItems = async (req, res) => {
@@ -176,10 +214,8 @@ export const adminSetFeaturedItems = async (req, res) => {
         .status(400)
         .json({ success: false, error: "items must be array" });
 
-    // delete old items
     await supabase.from("featured_build_items").delete().eq("build_id", id);
 
-    // insert new items
     for (const it of items) {
       if (!it.component_id) continue;
 
@@ -190,7 +226,6 @@ export const adminSetFeaturedItems = async (req, res) => {
       });
     }
 
-    // compute total
     const total = await computeTotal(id);
 
     await supabase
@@ -206,13 +241,12 @@ export const adminSetFeaturedItems = async (req, res) => {
       items: expanded,
     });
   } catch (err) {
-    console.error("adminSetFeaturedItems:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-/* ============================================================================
-   ADMIN — GET FULL BUILD (WITH ITEMS)
+/* ============================================================================ 
+   ADMIN — GET FULL BUILD 
 ============================================================================ */
 
 export const adminGetFeaturedBuild = async (req, res) => {
@@ -236,7 +270,6 @@ export const adminGetFeaturedBuild = async (req, res) => {
       data: { ...build, items },
     });
   } catch (err) {
-    console.error("adminGetFeaturedBuild:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };

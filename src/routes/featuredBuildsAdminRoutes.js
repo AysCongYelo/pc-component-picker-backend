@@ -8,16 +8,17 @@ import {
 } from "../controllers/featuredBuildsController.js";
 
 import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
+import { upload } from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
 router.use(requireAuth, requireAdmin);
 
-// Create
-router.post("/", adminCreateFeaturedBuild);
+// Create with image
+router.post("/", upload.single("image"), adminCreateFeaturedBuild);
 
-// Update
-router.put("/:id", adminUpdateFeaturedBuild);
+// Update with optional image
+router.put("/:id", upload.single("image"), adminUpdateFeaturedBuild);
 
 // Delete
 router.delete("/:id", adminDeleteFeaturedBuild);
