@@ -42,10 +42,10 @@ router.post("/addTempBuild", addTempBuildToCart);
 // Add a complete saved build
 router.post("/add-build/:buildId", addBuildToCart);
 
-// MINUS 1 (or delete if qty == 1)
-router.delete("/:itemId", removeFromCart);
-
 // DELETE ENTIRE ROW (quantity ignored)
 router.delete("/deleteRow/:itemId", deleteItemCompletely);
+
+// MINUS 1 (or delete if qty == 1)
+router.delete("/:itemId", removeFromCart);
 
 export default router;
