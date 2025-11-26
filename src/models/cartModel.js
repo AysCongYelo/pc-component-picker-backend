@@ -112,6 +112,23 @@ export const addBuildBundle = async (userId, buildId, totalPrice) => {
 
   return rows[0];
 };
+// -----------------------------------------------------------------------------
+// CART — ADD TEMP BUILD AS BUNDLE
+// -----------------------------------------------------------------------------
+
+export const addTempBuildBundle = async (userId, components, totalPrice) => {
+  const { rows } = await pool.query(
+    `
+      INSERT INTO cart_items
+        (user_id, component_id, build_id, price, quantity, category, components, updated_at)
+      VALUES ($1, NULL, NULL, $2, 1, 'temp_build', $3, NOW())
+      RETURNING *
+    `,
+    [userId, totalPrice, components]
+  );
+
+  return rows[0];
+};
 
 // -----------------------------------------------------------------------------
 // CART — REMOVE ITEM

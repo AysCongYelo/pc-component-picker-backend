@@ -123,4 +123,61 @@ export const addBuildToCart = async (req, res) => {
     console.error("addBuildToCart:", err.message);
     return res.status(500).json({ error: "Server error" });
   }
+}; /* ============================================================================
+   CART — ADD TEMP BUILD (NO SAVE REQUIRED)
+============================================================================ */
+
+// Add all components from the user's temp build directly to the cart.
+// Does NOT save the build as a bundle.
+export const addTempBuildToCart = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get temp build
+    const temp = await Builder.getTempBuild(userId);
+    const components = temp.components || {};
+
+    if (!components || Object.keys(components).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Your temp build is empty.",
+      });
+    }
+
+    // Ensure cart record exists
+    await Cart.getOrCreateCart(userId);
+
+    const addedItems = [];
+    let totalAddedPrice = 0;
+
+    // OPTIONAL: wrap this block in a DB transaction for all-or-nothing behavior.
+    for (const [category, componentId] of Object.entries(components)) {
+      // skip marker fields
+      if (!componentId || category === "__source_build_id") continue;
+
+      const comp = await Builder.getComponentWithSpecsById(componentId);
+      if (!comp) continue;
+
+      // ensure numeric price
+      const price = Number(comp.price || 0);
+      // fallback: if price is NaN, set to 0 (or skip)
+      const safePrice = Number.isFinite(price) ? price : 0;
+
+      const item = await Cart.addItem(userId, componentId, safePrice, category);
+
+      addedItems.push(item);
+      totalAddedPrice += safePrice;
+    }
+
+    return res.json({
+      success: true,
+      count: addedItems.length,
+      items: addedItems,
+      total_price: Number(totalAddedPrice.toFixed(2)),
+      message: "Temp build components added to cart.",
+    });
+  } catch (err) {
+    console.error("addTempBuildToCart:", err.message);
+    return res.status(500).json({ error: "Server error" });
+  }
 };
