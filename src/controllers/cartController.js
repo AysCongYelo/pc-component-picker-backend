@@ -8,8 +8,8 @@ import * as Cart from "../models/cartModel.js";
 import * as Builder from "../models/builderModel.js";
 
 /* ============================================================================
-   CART — GET ITEMS
-============================================================================ */
+    CART — GET ITEMS
+  ============================================================================ */
 
 /**
  * Get all cart items for the authenticated user.
@@ -32,8 +32,8 @@ export const getCart = async (req, res) => {
 };
 
 /* ============================================================================
-   CART — ADD SINGLE COMPONENT
-============================================================================ */
+    CART — ADD SINGLE COMPONENT
+  ============================================================================ */
 
 /**
  * Add a single component to the user's cart.
@@ -66,8 +66,8 @@ export const addToCart = async (req, res) => {
 };
 
 /* ============================================================================
-   CART — REMOVE ITEM
-============================================================================ */
+    CART — REMOVE ITEM
+  ============================================================================ */
 
 /**
  * Remove a cart item by item ID.
@@ -87,8 +87,8 @@ export const removeFromCart = async (req, res) => {
 };
 
 /* ============================================================================
-   CART — ADD FULL BUILD
-============================================================================ */
+    CART — ADD FULL BUILD
+  ============================================================================ */
 
 /**
  * Add a complete saved build to the cart as a bundled item.
@@ -124,8 +124,8 @@ export const addBuildToCart = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 }; /* ============================================================================
-   CART — ADD TEMP BUILD (NO SAVE REQUIRED)
-============================================================================ */
+    CART — ADD TEMP BUILD (NO SAVE REQUIRED)
+  ============================================================================ */
 
 // Add all components from the user's temp build directly to the cart.
 // Does NOT save the build as a bundle.
@@ -178,6 +178,19 @@ export const addTempBuildToCart = async (req, res) => {
     });
   } catch (err) {
     console.error("addTempBuildToCart:", err.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+export const deleteItemCompletely = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { itemId } = req.params;
+
+    await Cart.deleteRow(itemId, userId);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("deleteItemCompletely:", err.message);
     return res.status(500).json({ error: "Server error" });
   }
 };
