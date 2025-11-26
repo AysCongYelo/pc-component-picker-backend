@@ -1,6 +1,6 @@
 // src/utils/autoBuilder.js
 // -----------------------------------------------------------------------------
-// AUTO-BUILDER ENGINE (Optimized + Defensive)
+// AUTO-BUILDER ENGINE (Patched: best-fit + budget allocation)
 // Generates builds based on purpose, budget, and compatibility rules.
 // -----------------------------------------------------------------------------
 
@@ -11,7 +11,6 @@ import * as Compatibility from "./compatibility.js";
 // TIMEOUT HELPERS
 // ============================================================================
 
-// fastest safe timeout rule: each DB call must finish before OVERALL deadline
 const OVERALL_MS = 10000; // 10 seconds total for entire autobuild
 
 const withTimeout = (p, ms) =>
@@ -22,11 +21,10 @@ const withTimeout = (p, ms) =>
     ),
   ]);
 
-// compute remaining overall milliseconds
 const rem = (deadline) => Math.max(200, deadline - Date.now());
 
 // ============================================================================
-// PURPOSE PROFILES
+// PURPOSE PROFILES + BUDGET ALLOCATION (% of total budget)
 // ============================================================================
 
 const PURPOSES = {
@@ -92,32 +90,165 @@ const PURPOSES = {
   },
 };
 
-// ============================================================================
-// CPU selection helper
-// ============================================================================
-
-const selectCPUFromList = (cpus, rank) => {
-  if (!cpus || !cpus.length) return null;
-
-  const byPrice = [...cpus].sort((a, b) => Number(a.price) - Number(b.price));
-  const byCores = [...cpus].sort(
-    (a, b) => (b.specs?.cores || 0) - (a.specs?.cores || 0)
-  );
-
-  if (rank === "high") return byCores[0];
-
-  if (rank === "mid-high" || rank === "mid") {
-    return [...cpus].sort(
-      (a, b) =>
-        (b.specs?.cores || 0) - (a.specs?.cores || 0) ||
-        Number(a.price) - Number(b.price)
-    )[0];
-  }
-
-  return byPrice[0];
+/**
+ * Budget allocation percentages per purpose.
+ * Keys are categories. Values sum roughly to 1.0
+ * Tweak percentages if you want different targets.
+ */
+const BUDGET_ALLOCATION = {
+  gaming: {
+    gpu: 0.4, // 40%
+    cpu: 0.23, // 23%
+    motherboard: 0.1, // 10% (bumped up)
+    memory: 0.08,
+    storage: 0.08,
+    psu: 0.06,
+    case: 0.03,
+    cpu_cooler: 0.02,
+  },
+  workstation: {
+    cpu: 0.38, // 38%
+    memory: 0.22, // 22%
+    storage: 0.14,
+    motherboard: 0.1,
+    gpu: 0.08,
+    cpu_cooler: 0.04, // 4% (bumped up for high-end CPU)
+    psu: 0.03,
+    case: 0.01,
+  },
+  streaming: {
+    cpu: 0.3, // 30%
+    gpu: 0.28, // 28%
+    memory: 0.14,
+    storage: 0.1,
+    motherboard: 0.08, // 8% (bumped up)
+    psu: 0.05,
+    cpu_cooler: 0.03,
+    case: 0.02,
+  },
+  basic: {
+    cpu: 0.35,
+    memory: 0.2,
+    storage: 0.15,
+    motherboard: 0.12,
+    psu: 0.07, // 7% (lowered)
+    gpu: 0.06,
+    case: 0.03,
+    cpu_cooler: 0.02,
+  },
 };
 
-const priceNum = (c) => Number(c?.price || 0);
+// ============================================================================
+// HELPERS: robust price parsing & scoring
+// ============================================================================
+
+const priceNum = (c) => {
+  try {
+    if (!c) return 0;
+    const raw = c.price ?? 0;
+    const s = String(raw);
+    const clean = s.replace(/[^0-9.]/g, "");
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const cpuScore = (c) => {
+  const cores = Number(c?.specs?.cores || 0);
+  const threads = Number(c?.specs?.threads || 0);
+  const clock =
+    Number(c?.specs?.base_clock_ghz || 0) ||
+    Number((c?.specs?.base_clock_mhz || 0) / 1000 || 0) ||
+    0;
+  const perfField = Number(c?.specs?.performance_score || 0);
+  const base = perfField || cores * 100 + clock * 30 + threads * 10;
+  return base;
+};
+
+const gpuScore = (g) => {
+  const perf = Number(g?.specs?.performance_score || 0);
+  if (perf > 0) return perf;
+  const tdp = Number(g?.specs?.tdp || 0);
+  if (tdp > 0) return tdp * 10;
+  return priceNum(g);
+};
+
+const memoryScore = (m) => {
+  const cap = Number(m?.specs?.capacity_gb || 0);
+  const speed = Number(m?.specs?.speed_mhz || 0);
+  return cap * 100 + speed / 10;
+};
+
+const storageScore = (s) => {
+  const iface = String(s?.specs?.interface || "").toLowerCase();
+  const cap = Number(s?.specs?.capacity_gb || 0);
+  const nvme = /nvme|m\.2|m2|pci/.test(iface) ? 1 : 0;
+  return nvme * 10000 + cap;
+};
+
+const psuScore = (p) => Number(p?.specs?.wattage || 0);
+
+// ============================================================================
+// Budget allocation helper
+// ============================================================================
+
+const computeAllocatedBudgets = (purpose, budget) => {
+  if (budget === null || budget === undefined) return null;
+  const allocPerc = BUDGET_ALLOCATION[purpose] || BUDGET_ALLOCATION["basic"];
+  const allocated = {};
+  let usedPerc = 0;
+  for (const [k, v] of Object.entries(allocPerc)) {
+    allocated[k] = Math.floor(budget * v);
+    usedPerc += v;
+  }
+  // If percentages don't sum to 1, leave leftover as 'pool'
+  const leftover = Math.max(
+    0,
+    Math.floor(budget - Object.values(allocated).reduce((a, b) => a + b, 0))
+  );
+  allocated._pool = leftover;
+  return allocated;
+};
+
+// ============================================================================
+// CPU selection helper (respects rank and budget slice)
+// ============================================================================
+
+const selectCPUFromList = (cpus, rank, allocatedBudget, remaining) => {
+  if (!cpus || !cpus.length) return null;
+
+  const scored = cpus
+    .map((c) => ({ c, score: cpuScore(c), price: priceNum(c) }))
+    .sort((a, b) => b.score - a.score || a.price - b.price);
+
+  // prefer those within allocatedBudget (if provided), else within remaining
+  let candidates;
+  if (allocatedBudget !== null && allocatedBudget !== undefined) {
+    candidates = scored.filter((s) => s.price <= allocatedBudget);
+  }
+  if (!candidates || !candidates.length) {
+    candidates =
+      remaining !== null ? scored.filter((s) => s.price <= remaining) : scored;
+  }
+  if (!candidates || !candidates.length) candidates = scored;
+
+  const n = candidates.length;
+  const topEnd = Math.max(1, Math.ceil(n * 0.3));
+  const midEnd = Math.max(topEnd, Math.ceil(n * 0.7));
+  const top = candidates.slice(0, topEnd);
+  const mid = candidates.slice(topEnd, midEnd);
+  const low = candidates.slice(midEnd);
+
+  if (rank === "high")
+    return (top[Math.floor(top.length / 2)] || top[0] || candidates[0])?.c;
+  if (rank === "mid-high")
+    return (top[top.length - 1] || mid[0] || candidates[0])?.c;
+  if (rank === "mid")
+    return (mid[Math.floor(mid.length / 2)] || top[0] || candidates[0])?.c;
+  return (low[Math.floor(low.length / 2)] || mid[0] || candidates[0])?.c;
+};
 
 // ============================================================================
 // MAIN AUTO-BUILD ENGINE
@@ -129,17 +260,17 @@ export const buildFromPurpose = async ({
   respectCpu = null,
 }) => {
   const cfg = PURPOSES[purpose] || PURPOSES.basic;
-
-  // OVERALL DEADLINE
   const deadline = Date.now() + OVERALL_MS;
 
   const chosen = {};
   const chosenIds = {};
-
   let remaining =
     budget === null || budget === undefined ? null : Number(budget);
 
-  // Try expand initial empty build (cached)
+  // compute allocated budgets map (or null if no overall budget)
+  const allocatedBudgets = computeAllocatedBudgets(purpose, remaining);
+
+  // initial expanded build
   let expanded = {};
   try {
     expanded = await withTimeout(
@@ -152,37 +283,33 @@ export const buildFromPurpose = async ({
 
   const commit = async (cat, comp) => {
     if (!comp || !comp.id) return;
-
-    if (remaining !== null && priceNum(comp) > remaining) return;
+    const p = priceNum(comp);
+    if (remaining !== null && p > remaining) return;
 
     chosen[cat] = comp;
     chosenIds[cat] = comp.id;
 
     if (remaining !== null) {
-      remaining -= priceNum(comp);
+      remaining -= p;
       if (remaining < 0) remaining = 0;
     }
 
-    // update expanded
     try {
       expanded = await withTimeout(
         BuilderModel.expandComponents(chosenIds),
         rem(deadline)
       );
     } catch (_) {}
-
     return true;
   };
 
   const fetchList = async (cat) => {
     const ms = rem(deadline);
     if (ms <= 200) throw new Error("Global autobuild timeout reached");
-
     const list = await withTimeout(
       BuilderModel.getComponentsWithSpecs(cat),
       ms
     );
-
     return (list || []).filter(
       (c) => c && c.status === "active" && (c.stock === null || c.stock > 0)
     );
@@ -193,6 +320,11 @@ export const buildFromPurpose = async ({
     if (Date.now() > deadline) break;
 
     try {
+      // helper: local allocated budget for this category (may be undefined if no budget)
+      const localAlloc = allocatedBudgets
+        ? allocatedBudgets[category] ?? allocatedBudgets._pool ?? null
+        : null;
+
       // ------------------------ CPU
       if (category === "cpu") {
         let list = await fetchList("cpu");
@@ -207,7 +339,6 @@ export const buildFromPurpose = async ({
                 category: "cpu",
               }).ok &&
               (remaining === null || priceNum(keep) <= remaining);
-
             if (ok) {
               await commit("cpu", keep);
               continue;
@@ -222,14 +353,15 @@ export const buildFromPurpose = async ({
               category: "cpu",
             }).ok
         );
-
-        if (remaining !== null)
-          list = list.filter((c) => priceNum(c) <= remaining);
-
         if (!list.length) continue;
 
-        const best = selectCPUFromList(list, cfg.cpu_rank);
-        await commit("cpu", best);
+        const selected = selectCPUFromList(
+          list,
+          cfg.cpu_rank,
+          localAlloc,
+          remaining
+        );
+        if (selected) await commit("cpu", selected);
         continue;
       }
 
@@ -237,7 +369,6 @@ export const buildFromPurpose = async ({
       if (category === "motherboard") {
         let list = await fetchList("motherboard");
         if (!list.length) continue;
-
         const cpuSock = chosen.cpu?.specs?.socket;
         if (cpuSock) {
           const sock = String(cpuSock).toLowerCase();
@@ -245,7 +376,6 @@ export const buildFromPurpose = async ({
             (m) => String(m.specs?.socket || "").toLowerCase() === sock
           );
         }
-
         list = list.filter(
           (m) =>
             Compatibility.checkComponentAgainstBuild(expanded, "motherboard", {
@@ -253,15 +383,17 @@ export const buildFromPurpose = async ({
               category: "motherboard",
             }).ok
         );
-
-        if (remaining !== null)
-          list = list.filter((m) => priceNum(m) <= remaining);
-
         if (!list.length) continue;
-
+        let candidates = list;
+        if (localAlloc !== null)
+          candidates =
+            candidates.filter((m) => priceNum(m) <= localAlloc) || candidates;
+        if (remaining !== null && (!candidates || !candidates.length))
+          candidates = list.filter((m) => priceNum(m) <= remaining) || list;
+        candidates = candidates.length ? candidates : list;
         await commit(
           "motherboard",
-          [...list].sort((a, b) => priceNum(a) - priceNum(b))[0]
+          candidates[Math.floor(candidates.length / 2)] || candidates[0]
         );
         continue;
       }
@@ -270,13 +402,13 @@ export const buildFromPurpose = async ({
       if (category === "memory") {
         let list = await fetchList("memory");
         if (!list.length) continue;
-
         const type = chosen.motherboard?.specs?.memory_type;
         if (type)
           list = list.filter(
-            (r) => String(r.specs?.type || "").toLowerCase() === type
+            (r) =>
+              String(r.specs?.type || "").toLowerCase() ===
+              String(type).toLowerCase()
           );
-
         list = list.filter(
           (r) =>
             Compatibility.checkComponentAgainstBuild(expanded, "memory", {
@@ -284,46 +416,43 @@ export const buildFromPurpose = async ({
               category: "memory",
             }).ok
         );
-
-        const sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-        const enough = sorted.filter(
-          (r) => Number(r.specs?.capacity_gb || 0) >= cfg.ram_gb
+        if (!list.length) continue;
+        const sortedByCapacity = [...list].sort(
+          (a, b) => memoryScore(b) - memoryScore(a)
         );
-
-        if (remaining !== null && enough.length) {
-          const ok = enough.filter((r) => priceNum(r) <= remaining);
-          if (ok.length) {
-            await commit("memory", ok[0]);
+        const enough = sortedByCapacity.filter(
+          (r) => Number(r.specs?.capacity_gb || 0) >= (cfg.ram_gb || 8)
+        );
+        if (localAlloc !== null && enough.length) {
+          const affordable = enough.filter((r) => priceNum(r) <= localAlloc);
+          if (affordable.length) {
+            await commit(
+              "memory",
+              affordable[Math.floor(affordable.length / 2)]
+            );
             continue;
           }
         }
-
-        if (remaining === null && enough.length) {
+        if (enough.length) {
           await commit("memory", enough[0]);
           continue;
         }
-
-        if (remaining !== null) {
-          const affordable = sorted.filter((r) => priceNum(r) <= remaining);
-          if (affordable.length) {
-            await commit("memory", affordable[0]);
-            continue;
-          }
-        }
-
-        if (remaining === null && sorted.length) {
-          await commit("memory", sorted[0]);
-        }
+        let affordableAll = sortedByCapacity.filter(
+          (r) => priceNum(r) <= (remaining === null ? Infinity : remaining)
+        );
+        affordableAll = affordableAll.length ? affordableAll : sortedByCapacity;
+        await commit(
+          "memory",
+          affordableAll[Math.floor(affordableAll.length / 2)]
+        );
         continue;
       }
 
       // ------------------------ GPU
       if (category === "gpu") {
         if (!cfg.prefer_gpu) continue;
-
         let list = await fetchList("gpu");
         if (!list.length) continue;
-
         list = list.filter(
           (g) =>
             Compatibility.checkComponentAgainstBuild(expanded, "gpu", {
@@ -331,14 +460,20 @@ export const buildFromPurpose = async ({
               category: "gpu",
             }).ok
         );
-
-        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-        if (remaining !== null)
-          sorted = sorted.filter((g) => priceNum(g) <= remaining);
-
-        if (!sorted.length) continue;
-
-        await commit("gpu", sorted[0]);
+        if (!list.length) continue;
+        let scored = list
+          .map((g) => ({ g, score: gpuScore(g), price: priceNum(g) }))
+          .sort((a, b) => b.score - a.score || a.price - b.price);
+        let candidates = [];
+        if (localAlloc !== null)
+          candidates = scored.filter((s) => s.price <= localAlloc);
+        if (!candidates.length)
+          candidates =
+            remaining !== null
+              ? scored.filter((s) => s.price <= remaining)
+              : scored;
+        if (!candidates.length) candidates = scored;
+        await commit("gpu", candidates[0].g);
         continue;
       }
 
@@ -346,7 +481,6 @@ export const buildFromPurpose = async ({
       if (category === "storage") {
         let list = await fetchList("storage");
         if (!list.length) continue;
-
         list = list.filter(
           (s) =>
             Compatibility.checkComponentAgainstBuild(expanded, "storage", {
@@ -354,52 +488,58 @@ export const buildFromPurpose = async ({
               category: "storage",
             }).ok
         );
-
+        if (!list.length) continue;
         const nvme = list.filter((s) =>
-          String(s.specs?.interface || "")
-            .toLowerCase()
-            .includes("nvme")
+          /nvme|m\.2|m2|pci/.test(
+            String(s.specs?.interface || "").toLowerCase()
+          )
         );
-
-        let sorted = [...(nvme.length ? nvme : list)].sort(
-          (a, b) => priceNum(a) - priceNum(b)
-        );
-
-        if (remaining !== null)
-          sorted = sorted.filter((s) => priceNum(s) <= remaining);
-
-        if (!sorted.length) continue;
-
-        await commit("storage", sorted[0]);
+        let preferred = nvme.length ? nvme : list;
+        let scored = preferred
+          .map((s) => ({ s, score: storageScore(s), price: priceNum(s) }))
+          .sort((a, b) => b.score - a.score || a.price - b.price);
+        let candidates = [];
+        if (localAlloc !== null)
+          candidates = scored.filter((x) => x.price <= localAlloc);
+        if (!candidates.length)
+          candidates =
+            remaining !== null
+              ? scored.filter((x) => x.price <= remaining)
+              : scored;
+        if (!candidates.length) candidates = scored;
+        await commit("storage", candidates[0].s);
         continue;
       }
 
-      // ------------------------ PSU
+      // ------------------------ PSU (PATCHED — never skip)
       if (category === "psu") {
         let list = await fetchList("psu");
         if (!list.length) continue;
 
         const cpuT = Number(chosen.cpu?.specs?.tdp || 0);
         const gpuT = Number(chosen.gpu?.specs?.tdp || 0);
-        const need = Math.max(450, Math.ceil((cpuT + gpuT) * 1.5));
 
-        list = list.filter((p) => Number(p.specs?.wattage || 0) >= need);
+        // realistic recommended wattage
+        const need = Math.ceil((cpuT + gpuT) * 1.2);
 
-        list = list.filter(
-          (p) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "psu", {
-              ...p,
-              category: "psu",
-            }).ok
-        );
+        // DO NOT hard filter — only sort (fix)
+        list = list
+          .map((p) => ({
+            ...p,
+            _watt: Number(p.specs?.wattage || 0),
+            _price: priceNum(p),
+          }))
+          .sort((a, b) => {
+            // prefer wattage >= need but still allow weaker PSUs
+            const aOK = a._watt >= need ? 1 : 0;
+            const bOK = b._watt >= need ? 1 : 0;
 
-        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-        if (remaining !== null)
-          sorted = sorted.filter((p) => priceNum(p) <= remaining);
+            if (aOK !== bOK) return bOK - aOK; // prioritize meeting wattage
+            return a._price - b._price; // otherwise cheapest
+          });
 
-        if (!sorted.length) continue;
-
-        await commit("psu", sorted[0]);
+        const chosenPsu = list[0];
+        await commit("psu", chosenPsu);
         continue;
       }
 
@@ -407,20 +547,16 @@ export const buildFromPurpose = async ({
       if (category === "case") {
         let list = await fetchList("case");
         if (!list.length) continue;
-
         const mbForm = chosen.motherboard?.specs?.form_factor;
         const gpuLen = Number(chosen.gpu?.specs?.length || 0);
-
         if (mbForm)
           list = list.filter((c) =>
             (c.specs?.form_factor_support || []).includes(mbForm)
           );
-
         list = list.filter((c) => {
           const max = Number(c.specs?.max_gpu_length || 0);
           return !gpuLen || !max || gpuLen <= max;
         });
-
         list = list.filter(
           (c) =>
             Compatibility.checkComponentAgainstBuild(expanded, "case", {
@@ -428,14 +564,16 @@ export const buildFromPurpose = async ({
               category: "case",
             }).ok
         );
-
-        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-        if (remaining !== null)
-          sorted = sorted.filter((c) => priceNum(c) <= remaining);
-
-        if (!sorted.length) continue;
-
-        await commit("case", sorted[0]);
+        if (!list.length) continue;
+        let candidates =
+          remaining !== null
+            ? list.filter(
+                (c) =>
+                  priceNum(c) <= (localAlloc !== null ? localAlloc : remaining)
+              )
+            : list;
+        candidates = candidates.length ? candidates : list;
+        await commit("case", candidates[Math.floor(candidates.length / 2)]);
         continue;
       }
 
@@ -443,22 +581,18 @@ export const buildFromPurpose = async ({
       if (category === "cpu_cooler") {
         let list = await fetchList("cpu_cooler");
         if (!list.length) continue;
-
         const socket = chosen.cpu?.specs?.socket;
         const heightLimit = Number(
           chosen.case?.specs?.max_cpu_cooler_height || 0
         );
-
         list = list.filter((c) => {
           const sockets = c.specs?.compatible_sockets || [];
           const h = Number(c.specs?.height || 0);
-
-          if (socket && !sockets.includes(socket)) return false;
+          if (socket && sockets.length && !sockets.includes(socket))
+            return false;
           if (heightLimit && h > heightLimit) return false;
-
           return true;
         });
-
         list = list.filter(
           (c) =>
             Compatibility.checkComponentAgainstBuild(expanded, "cpu_cooler", {
@@ -466,18 +600,26 @@ export const buildFromPurpose = async ({
               category: "cpu_cooler",
             }).ok
         );
-
-        let sorted = [...list].sort((a, b) => priceNum(a) - priceNum(b));
-        if (remaining !== null)
-          sorted = sorted.filter((c) => priceNum(c) <= remaining);
-
-        if (!sorted.length) continue;
-
-        await commit("cpu_cooler", sorted[0]);
+        if (!list.length) continue;
+        let candidates =
+          remaining !== null
+            ? list.filter(
+                (c) =>
+                  priceNum(c) <= (localAlloc !== null ? localAlloc : remaining)
+              )
+            : list;
+        candidates = candidates.length ? candidates : list;
+        await commit(
+          "cpu_cooler",
+          candidates[Math.floor(candidates.length / 2)]
+        );
         continue;
       }
     } catch (err) {
-      console.warn(`auto-build step failed for ${category}:`, err.message);
+      console.warn(
+        `auto-build step failed for ${category}:`,
+        err?.message || err
+      );
       continue;
     }
   }
@@ -487,7 +629,6 @@ export const buildFromPurpose = async ({
   for (const [cat, comp] of Object.entries(chosen)) {
     finalIds[cat] = comp?.id || null;
   }
-
   return finalIds;
 };
 
@@ -499,18 +640,13 @@ export const autoCompleteBuild = async (partial) => {
   const expanded = await BuilderModel.expandComponents(partial).catch(
     () => ({})
   );
-
   let purpose = "gaming";
-  if (expanded.memory?.specs?.capacity_gb >= 32) {
-    purpose = "workstation";
-  }
-
+  if (expanded.memory?.specs?.capacity_gb >= 32) purpose = "workstation";
   const auto = await buildFromPurpose({
     purpose,
     budget: null,
     respectCpu: expanded.cpu?.id || null,
   });
-
   const final = {};
   for (const key of [
     "cpu",
@@ -524,6 +660,5 @@ export const autoCompleteBuild = async (partial) => {
   ]) {
     final[key] = partial[key] || auto[key] || null;
   }
-
   return final;
 };

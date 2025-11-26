@@ -21,8 +21,8 @@ const ALLOWED_CATEGORIES = [
 ];
 
 /* ============================================================================
-   BUILDER — GET AVAILABLE COMPONENTS
-============================================================================ */
+    BUILDER — GET AVAILABLE COMPONENTS
+  ============================================================================ */
 
 /**
  * Get compatible components for a specific category.
@@ -87,8 +87,8 @@ export const getComponents = async (req, res) => {
 };
 
 /* ============================================================================
-   BUILDER — TEMPORARY BUILD
-============================================================================ */
+    BUILDER — TEMPORARY BUILD
+  ============================================================================ */
 
 /**
  * Get the user's current temporary build (workspace).
@@ -221,8 +221,8 @@ export const resetTempBuild = async (req, res) => {
 };
 
 /* ============================================================================
-   BUILDER — SAVE / LOAD / MANAGE USER BUILDS
-============================================================================ */
+    BUILDER — SAVE / LOAD / MANAGE USER BUILDS
+  ============================================================================ */
 
 /**
  * Save current temp build as a user build.
@@ -377,8 +377,8 @@ export const deleteBuild = async (req, res) => {
 };
 
 /* ============================================================================
-   BUILDER — AUTO BUILDER TOOLS
-============================================================================ */
+    BUILDER — AUTO BUILDER TOOLS
+  ============================================================================ */
 
 /**
  * Auto-complete missing parts of the temp build.
@@ -476,8 +476,8 @@ export const autoBuild = async (req, res) => {
 };
 
 /* ============================================================================
-   BUILDER — ADMIN VIEW
-============================================================================ */
+    BUILDER — ADMIN VIEW
+  ============================================================================ */
 
 /**
  * Get all builds with user info (admin only).
@@ -495,8 +495,8 @@ export const getAllBuildsWithUser = async (req, res) => {
 };
 
 /* ============================================================================
-   BUILDER — LOAD & UPDATE SAVED BUILD
-============================================================================ */
+    BUILDER — LOAD & UPDATE SAVED BUILD
+  ============================================================================ */
 
 /**
  * Load a saved build into the temporary builder workspace.
