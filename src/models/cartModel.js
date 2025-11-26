@@ -48,17 +48,20 @@ export const getCartItems = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT 
-        ci.*,
-        c.name AS component_name,
-        c.price AS component_price,
-        c.category_id,
-        ub.name AS build_name,
-        ub.total_price AS build_total_price
-      FROM cart_items ci
-      LEFT JOIN components c ON c.id = ci.component_id
-      LEFT JOIN user_builds ub ON ub.id = ci.build_id
-      WHERE ci.user_id = $1
-      ORDER BY ci.created_at DESC
+  ci.*,
+  c.name AS component_name,
+  c.price AS component_price,
+  ub.name AS build_name,
+  ub.total_price AS build_total_price,
+  p.full_name AS user_name,
+  p.email AS user_email
+FROM cart_items ci
+LEFT JOIN components c ON c.id = ci.component_id
+LEFT JOIN user_builds ub ON ub.id = ci.build_id
+LEFT JOIN profiles p ON p.id = ci.user_id
+WHERE ci.user_id = $1
+ORDER BY ci.created_at DESC
+
     `,
     [userId]
   );

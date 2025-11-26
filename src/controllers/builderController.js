@@ -242,7 +242,7 @@ export const saveBuild = async (req, res) => {
 
     const check = Compatibility.checkWholeBuild(expanded);
 
-    let compatibilityState = "ok";
+    let compatibilityState = "compatible";
     if (!check.ok) compatibilityState = "invalid";
     else if (isIncomplete) compatibilityState = "incomplete";
 
