@@ -210,7 +210,10 @@ export const buildSummary = (expanded) => {
   let total = 0;
   let tdp = 0;
 
-  for (const item of Object.values(expanded)) {
+  for (const [key, item] of Object.entries(expanded)) {
+    // Skip metadata
+    if (key === "__source_build_id") continue;
+
     total += Number(item.price || 0);
     tdp += Number(item.specs?.tdp || 0);
   }
