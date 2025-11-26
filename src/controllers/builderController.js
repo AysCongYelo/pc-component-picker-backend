@@ -444,8 +444,17 @@ export const autoBuild = async (req, res) => {
       respectCpu: null,
     });
 
+    // Always overwrite full temp build for autobuild
     await BuilderModel.upsertTempBuild(req.user.id, {
       ...built,
+      cpu: built.cpu || null,
+      motherboard: built.motherboard || null,
+      memory: built.memory || null,
+      gpu: built.gpu || null,
+      storage: built.storage || null,
+      psu: built.psu || null,
+      case: built.case || null,
+      cpu_cooler: built.cpu_cooler || null,
       ...(sourceId ? { __source_build_id: sourceId } : {}),
     });
 
