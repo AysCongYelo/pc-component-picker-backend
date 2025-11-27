@@ -56,37 +56,32 @@ const loadSpecSourceMap = async () => {
  * Uses cache + pre-scanned table map for 10x speed.
  */
 export const getSpecsForComponent = async (componentId) => {
+  // Return cached if exists
   if (specsCache.has(componentId)) {
     return specsCache.get(componentId);
   }
 
-  const map = await loadSpecSourceMap();
-  const table = map[componentId];
+  // Scan all spec tables instead of using map
+  for (const table of SPEC_TABLES) {
+    const { rows } = await pool.query(
+      `SELECT * FROM ${table} WHERE component_id = $1 LIMIT 1`,
+      [componentId]
+    );
 
-  if (!table) {
-    specsCache.set(componentId, {});
-    return {};
+    if (rows[0]) {
+      const spec = { ...rows[0] };
+      delete spec.id;
+      delete spec.component_id;
+      delete spec.created_at;
+
+      specsCache.set(componentId, spec);
+      return spec;
+    }
   }
 
-  const { rows } = await pool.query(
-    `SELECT * FROM ${table} WHERE component_id = $1 LIMIT 1`,
-    [componentId]
-  );
-
-  const row = rows[0];
-
-  if (!row) {
-    specsCache.set(componentId, {});
-    return {};
-  }
-
-  const spec = { ...row };
-  delete spec.id;
-  delete spec.component_id;
-  delete spec.created_at;
-
-  specsCache.set(componentId, spec);
-  return spec;
+  // No match → return empty
+  specsCache.set(componentId, {});
+  return {};
 };
 
 // -----------------------------------------------------------------------------
@@ -162,13 +157,13 @@ export const upsertTempBuild = async (userId, components) => {
   await pool.query(
     `
       INSERT INTO user_builds_temp (user_id, components, updated_at)
-      VALUES ($1, $2, now())
+      VALUES ($1, $2::jsonb, now())
       ON CONFLICT (user_id)
       DO UPDATE SET
         components = EXCLUDED.components,
         updated_at = now()
     `,
-    [userId, components]
+    [userId, JSON.stringify(components)]
   );
 };
 

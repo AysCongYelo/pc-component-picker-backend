@@ -139,7 +139,13 @@ export const addToTempBuild = async (req, res) => {
       return res.status(404).json({ error: "component not found" });
 
     const temp = await BuilderModel.getTempBuild(req.user.id);
-    const expanded = await BuilderModel.expandComponents(temp.components || {});
+
+    // ⭐ FIX: initialize components correctly
+    if (!temp.components || typeof temp.components !== "object") {
+      temp.components = {};
+    }
+
+    const expanded = await BuilderModel.expandComponents(temp.components);
 
     const isOk = Compatibility.checkComponentAgainstBuild(expanded, category, {
       ...component,
@@ -153,7 +159,9 @@ export const addToTempBuild = async (req, res) => {
       });
     }
 
+    // ⭐ FIX: safe add / replace
     temp.components[category] = componentId;
+
     await BuilderModel.upsertTempBuild(req.user.id, temp.components);
 
     const detailed = await BuilderModel.expandComponents(temp.components);
