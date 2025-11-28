@@ -121,21 +121,80 @@ export async function publicGetComponent(req, res) {
 }
 
 /* ================================
-   PUBLIC TRENDING COMPONENTS
+   PUBLIC TRENDING COMPONENTS (Smart)
 ================================ */
 export async function publicGetTrending(req, res) {
   try {
+    // 1️⃣ fetch components with views + stock + category
     const { data, error } = await supabase
       .from("components")
-      .select("id, name, brand, price, image_url, category_id, views")
+      .select("id, name, brand, price, image_url, category_id, views, stock")
       .eq("status", "active")
-      .order("views", { ascending: false })
-      .limit(10);
+      .gt("stock", 0);
 
     if (error) throw error;
 
-    return res.json({ success: true, data });
+    if (!data || data.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // 2️⃣ compute trending score
+    const ranked = data
+      .map((c) => ({
+        ...c,
+        trending_score:
+          (c.views || 0) * 0.7 + (10 - Math.min(c.stock, 10)) * 0.3,
+      }))
+      .sort((a, b) => b.trending_score - a.trending_score);
+
+    // 3️⃣ ensure category balance — max 2 per category
+    const categoryCount = {};
+    const balanced = [];
+
+    for (const item of ranked) {
+      const category = CATEGORY_MAP[item.category_id] || "other";
+
+      if (!categoryCount[category]) categoryCount[category] = 0;
+
+      if (categoryCount[category] < 2) {
+        balanced.push(item);
+        categoryCount[category]++;
+      }
+
+      if (balanced.length >= 10) break;
+    }
+
+    // 4️⃣ fetch specs for each item
+    const results = [];
+
+    for (const comp of balanced) {
+      const categoryName = CATEGORY_MAP[comp.category_id];
+      const table = SPECS_TABLE[categoryName];
+
+      let specs = {};
+
+      if (table) {
+        const { data: specData } = await supabase
+          .from(table)
+          .select("*")
+          .eq("component_id", comp.id)
+          .single();
+
+        if (specData) specs = specData;
+      }
+
+      results.push({
+        ...comp,
+        specs,
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: results,
+    });
   } catch (err) {
+    console.error("publicGetTrending ERROR:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }

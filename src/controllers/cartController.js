@@ -98,32 +98,42 @@ export const addBuildToCart = async (req, res) => {
     const userId = req.user.id;
     const buildId = req.params.buildId;
 
-    // Get build with ownership check
+    // 1. Get build with ownership check
     const build = await Builder.getFullBuildById(buildId, userId);
     if (!build) {
       return res.status(404).json({ error: "Build not found" });
     }
 
-    // Expand component details to compute total bundle price
+    // 2. Expand components & compute total price
     const expanded = await Builder.expandComponents(build.components);
-
     const totalPrice = Object.values(expanded).reduce(
       (sum, comp) => sum + Number(comp.price || 0),
       0
     );
 
-    const bundle = await Cart.addBuildBundle(userId, buildId, totalPrice);
+    // count how many components in the build
+    const count = Object.keys(expanded).length;
+
+    // 3. Insert bundled build into cart
+    const bundle = await Cart.addBuildBundle({
+      user_id: userId,
+      build_id: build.id,
+      build_name: build.name,
+      build_total_price: totalPrice,
+      bundle_item_count: count, // ✔ now valid
+    });
 
     return res.json({
       success: true,
       message: "Build added to cart as bundled item.",
-      bundle,
+      item: bundle,
     });
   } catch (err) {
     console.error("addBuildToCart:", err.message);
     return res.status(500).json({ error: "Server error" });
   }
-}; /* ============================================================================
+};
+/* ============================================================================
     CART — ADD TEMP BUILD (NO SAVE REQUIRED)
   ============================================================================ */
 

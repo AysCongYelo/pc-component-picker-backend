@@ -48,20 +48,24 @@ export const getCartItems = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT 
-        ci.*,
-        c.name AS component_name,
-        c.price AS component_price,
-        c.category_id AS component_category,
-        ub.name AS build_name,
-        ub.total_price AS build_total_price,
-        p.full_name AS user_name,
-        p.email AS user_email
+        ci.id,
+        ci.user_id,
+        ci.component_id,
+        ci.build_id,
+        ci.build_name,
+        ci.build_total_price,
+        ci.price,
+        ci.quantity,
+        ci.category,
+        ci.components,
+        ci.bundle_item_count,
+        ci.updated_at,
+        c.name AS component_name
       FROM cart_items ci
-      LEFT JOIN components c ON c.id = ci.component_id
-      LEFT JOIN user_builds ub ON ub.id = ci.build_id
-      LEFT JOIN profiles p ON p.id = ci.user_id
+      LEFT JOIN components c
+        ON ci.component_id = c.id
       WHERE ci.user_id = $1
-      ORDER BY ci.created_at DESC
+      ORDER BY ci.updated_at DESC
     `,
     [userId]
   );
@@ -102,19 +106,26 @@ export const addItem = async (userId, componentId, price, category) => {
 /**
  * Adds a full saved build to the cart as a "build_bundle" item.
  */
-export const addBuildBundle = async (userId, buildId, totalPrice) => {
+export const addBuildBundle = async ({
+  user_id,
+  build_id,
+  build_name,
+  build_total_price,
+  bundle_item_count, // <── ADD THIS
+}) => {
   const { rows } = await pool.query(
     `
       INSERT INTO cart_items
-        (user_id, component_id, build_id, price, quantity, category, updated_at)
-      VALUES ($1, NULL, $2, $3, 1, 'build_bundle', NOW())
+        (user_id, build_id, build_name, price, quantity, category, bundle_item_count, updated_at)
+      VALUES ($1, $2, $3, $4, 1, 'build_bundle', $5, NOW())
       RETURNING *
     `,
-    [userId, buildId, totalPrice]
+    [user_id, build_id, build_name, build_total_price, bundle_item_count]
   );
 
   return rows[0];
 };
+
 // -----------------------------------------------------------------------------
 // CART — ADD TEMP BUILD AS BUNDLE
 // -----------------------------------------------------------------------------

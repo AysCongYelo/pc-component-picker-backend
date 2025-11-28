@@ -29,17 +29,17 @@ export const checkout = async (req, res) => {
     const { item_ids = [], payment_method, notes } = req.body;
 
     const cartItems = await Cart.getCartItems(userId);
-    if (cartItems.length === 0) {
+    if (!Array.isArray(cartItems) || cartItems.length === 0) {
       return res.status(400).json({ error: "Cart is empty" });
     }
 
     // Selective checkout — if none provided, checkout everything
     const items =
-      item_ids.length > 0
+      Array.isArray(item_ids) && item_ids.length > 0
         ? cartItems.filter((i) => item_ids.includes(i.id))
         : cartItems;
 
-    if (items.length === 0) {
+    if (!items || items.length === 0) {
       return res.status(400).json({ error: "No valid items selected" });
     }
 
@@ -56,7 +56,7 @@ export const checkout = async (req, res) => {
 
       const stock = rows[0]?.stock ?? 0;
 
-      if (stock < item.quantity) {
+      if (stock < (Number(item.quantity) || 0)) {
         return res.status(400).json({
           error: `Not enough stock for ${item.component_name}. Remaining: ${stock}`,
         });
@@ -67,7 +67,7 @@ export const checkout = async (req, res) => {
        CREATE ORDER
     ----------------------------------------------------------------------- */
     const total = items.reduce(
-      (sum, i) => sum + Number(i.price) * Number(i.quantity),
+      (sum, i) => sum + Number(i.price || 0) * Number(i.quantity || 0),
       0
     );
 
@@ -86,8 +86,12 @@ export const checkout = async (req, res) => {
 
     /* -----------------------------------------------------------------------
        INSERT ORDER ITEMS + DEDUCT STOCK
+       - For component items: component_id set, build_id null
+       - For bundle items: component_id null, build_id set
     ----------------------------------------------------------------------- */
     for (const item of items) {
+      const isBundle = item.category === "build_bundle";
+
       // Insert into order_items
       await client.query(
         `
@@ -97,23 +101,23 @@ export const checkout = async (req, res) => {
         `,
         [
           order.id,
-          item.component_id || null,
-          item.build_id || null,
-          item.quantity,
-          item.price,
+          isBundle ? null : item.component_id || null,
+          isBundle ? item.build_id || null : null,
+          Number(item.quantity || 1),
+          Number(item.price || 0),
           item.category || null,
         ]
       );
 
       // Deduct stock for actual components
-      if (item.component_id) {
+      if (!isBundle && item.component_id) {
         await client.query(
           `
             UPDATE components
                SET stock = stock - $1
              WHERE id = $2
           `,
-          [item.quantity, item.component_id]
+          [Number(item.quantity || 1), item.component_id]
         );
       }
     }
@@ -164,18 +168,21 @@ export const checkoutBuild = async (req, res) => {
     const buildId = req.params.buildId;
     const { payment_method, notes } = req.body;
 
+    // fetch the saved build (must be owned by user)
     const build = await Builder.getUserBuildById(userId, buildId);
     if (!build) {
       return res.status(404).json({ error: "Build not found" });
     }
 
-    const expanded = await Builder.expandComponents(build.components);
+    // expand components (this returns an object keyed by category)
+    const expanded = await Builder.expandComponents(build.components || {});
 
-    const totalPrice = Object.values(expanded).reduce(
-      (sum, comp) => sum + Number(comp.price),
-      0
-    );
+    // compute total safely (ignore metadata keys)
+    const totalPrice = Object.values(expanded)
+      .filter((c) => c && typeof c === "object" && c.price !== undefined)
+      .reduce((sum, comp) => sum + Number(comp.price || 0), 0);
 
+    // Use "quantity" (not "qty") and include build_id for bundle items
     const items = [
       {
         component_id: null,
@@ -186,12 +193,21 @@ export const checkoutBuild = async (req, res) => {
       },
     ];
 
+    // create order using your order transaction helper
     const order = await createOrderTransaction({
       userId,
       items,
       payment_method: payment_method || "cod",
       notes: notes || null,
     });
+
+    // mark build as removed from saved list (do NOT delete the row) to avoid FK issues
+    try {
+      await Builder.removeFromSaved(userId, buildId);
+    } catch (e) {
+      // non-fatal: log but don't fail the whole checkout (order already created)
+      console.warn("removeFromSaved failed:", e.message || e);
+    }
 
     return res.json({
       success: true,
