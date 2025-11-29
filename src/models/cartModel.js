@@ -60,7 +60,13 @@ export const getCartItems = async (userId) => {
         ci.components,
         ci.bundle_item_count,
         ci.updated_at,
-        c.name AS component_name
+
+        -- REAL COMPONENT DATA
+        c.name AS component_name,
+        c.price AS component_price,
+        c.image_url AS image_url,
+        c.category_id AS category_id
+
       FROM cart_items ci
       LEFT JOIN components c
         ON ci.component_id = c.id
