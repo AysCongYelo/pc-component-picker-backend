@@ -44,6 +44,8 @@ export const getOrCreateCart = async (userId) => {
  *  - regular components
  *  - bundled saved builds
  */
+import * as Builder from "../models/builderModel.js";
+
 export const getCartItems = async (userId) => {
   const { rows } = await pool.query(
     `
@@ -80,6 +82,28 @@ export const getCartItems = async (userId) => {
     `,
     [userId]
   );
+
+  // ----------------------------
+  // ⭐ ATTACH bundle_items HERE
+  // ----------------------------
+
+  for (const row of rows) {
+    if (row.category === "build_bundle" && row.build_id) {
+      const fullBuild = await Builder.getFullBuildById(row.build_id, userId);
+
+      if (fullBuild && fullBuild.components) {
+        const expanded = await Builder.expandComponents(fullBuild.components);
+
+        row.bundle_items = Object.values(expanded).map((comp) => ({
+          category: comp.category,
+          name: comp.name,
+          price: comp.price,
+        }));
+      } else {
+        row.bundle_items = [];
+      }
+    }
+  }
 
   return rows;
 };
