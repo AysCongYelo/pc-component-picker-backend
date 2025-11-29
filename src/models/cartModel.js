@@ -44,7 +44,7 @@ export const getOrCreateCart = async (userId) => {
  *  - regular components
  *  - bundled saved builds
  */
-import * as Builder from "./models/builderModel.js";
+import * as Builder from "../models/builderModel.js";
 
 export const getCartItems = async (userId) => {
   const { rows } = await pool.query(
