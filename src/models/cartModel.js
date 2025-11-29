@@ -65,11 +65,16 @@ export const getCartItems = async (userId) => {
         c.name AS component_name,
         c.price AS component_price,
         c.image_url AS image_url,
-        c.category_id AS category_id
+        c.category_id AS category_id,
+
+        -- SAVED BUILD IMAGE
+        ub.image_url AS build_image_url
 
       FROM cart_items ci
       LEFT JOIN components c
         ON ci.component_id = c.id
+      LEFT JOIN user_builds ub
+        ON ci.build_id = ub.id
       WHERE ci.user_id = $1
       ORDER BY ci.updated_at DESC
     `,

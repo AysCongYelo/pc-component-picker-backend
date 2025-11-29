@@ -164,11 +164,28 @@ export const saveUserBuild = async (
   userId,
   { name, components, total_price, power_usage, compatibility = "ok" }
 ) => {
+  // 1. Expand components to get full info including image URLs
+  const expanded = await expandComponents(components);
+
+  // 2. Pick CASE image → fallback to other components
+  let buildImage = null;
+
+  const priority = ["case", "gpu", "cpu", "motherboard", "memory"];
+
+  for (const p of priority) {
+    if (expanded[p]?.image_url) {
+      buildImage = expanded[p].image_url;
+      break;
+    }
+  }
+
+  // 3. Insert with image_url
   const { rows } = await pool.query(
     `
       INSERT INTO user_builds
-        (user_id, name, components, total_price, power_usage, compatibility, is_saved, created_at, updated_at)
-      VALUES ($1, $2, $3::jsonb, $4, $5, $6, true, now(), now())
+        (user_id, name, components, total_price, power_usage, compatibility, 
+         is_saved, image_url, created_at, updated_at)
+      VALUES ($1, $2, $3::jsonb, $4, $5, $6, true, $7, now(), now())
       RETURNING *
     `,
     [
@@ -178,6 +195,7 @@ export const saveUserBuild = async (
       total_price,
       power_usage,
       compatibility,
+      buildImage,
     ]
   );
 
