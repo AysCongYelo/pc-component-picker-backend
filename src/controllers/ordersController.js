@@ -1,14 +1,13 @@
 // src/controllers/ordersController.js
 // -----------------------------------------------------------------------------
-// USER ORDERS CONTROLLER
-// Handles: listing all user orders + retrieving full order details.
+// Returns user order list + full order detail
 // -----------------------------------------------------------------------------
 
 import * as OrderModel from "../models/orderModel.js";
 
-/* ============================================================================
-   USER — GET ALL MY ORDERS
-============================================================================ */
+// -----------------------------------------------------------------------------
+// GET ALL MY ORDERS
+// -----------------------------------------------------------------------------
 
 export const getMyOrders = async (req, res) => {
   try {
@@ -16,27 +15,25 @@ export const getMyOrders = async (req, res) => {
 
     const orders = await OrderModel.getUserOrders(userId);
 
-    const formatted = orders.map((o) => ({
-      id: o.id,
-      total: o.total,
-      status: o.status,
-      payment_method: o.payment_method,
-      created_at: o.created_at,
-    }));
-
     return res.json({
       success: true,
-      orders: formatted,
+      orders: orders.map((o) => ({
+        id: o.id,
+        total: o.total,
+        status: o.status,
+        payment_method: o.payment_method,
+        created_at: o.created_at,
+      })),
     });
   } catch (err) {
-    console.error("getMyOrders:", err.message);
+    console.error("getMyOrders:", err);
     return res.status(500).json({ success: false, error: "Server error" });
   }
 };
 
-/* ============================================================================
-   USER — GET SINGLE ORDER DETAIL
-============================================================================ */
+// -----------------------------------------------------------------------------
+// GET SINGLE ORDER DETAIL
+// -----------------------------------------------------------------------------
 
 export const getMyOrderDetail = async (req, res) => {
   try {
@@ -53,19 +50,16 @@ export const getMyOrderDetail = async (req, res) => {
 
     const items = await OrderModel.getOrderItems(orderId);
 
-    // 🔥 FRONTEND EXPECTS: order.items + order.total inside single object
-    const fullOrder = {
-      ...order,
-      items, // merge items array
-      total: order.total,
-    };
-
     return res.json({
       success: true,
-      order: fullOrder,
+      order: {
+        ...order,
+        items,
+        total: order.total,
+      },
     });
   } catch (err) {
-    console.error("getMyOrderDetail:", err.message);
+    console.error("getMyOrderDetail:", err);
     return res.status(500).json({ success: false, error: "Server error" });
   }
 };

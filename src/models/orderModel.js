@@ -1,27 +1,23 @@
 // src/models/orderModel.js
 // -----------------------------------------------------------------------------
-// ORDER MODEL
+// ORDER MODEL — Clean, Bug-Free Version
 // Handles:
-// - Transactional order creation
-// - Stock validation + deduction
-// - Fetching orders for user/admin
-// - Order status updates
+// - Build checkout
+// - Stock validation
+// - Order + order_items creation
+// - User order queries
 // -----------------------------------------------------------------------------
 
 import pool from "../db.js";
 import * as Builder from "../models/builderModel.js";
 
 // -----------------------------------------------------------------------------
-// ORDER — CREATE WITH TRANSACTION (used by checkoutBuild)
+// CREATE ORDER FOR SAVED BUILD CHECKOUT
 // -----------------------------------------------------------------------------
 
-/**
- * Creates a new order for a SAVED BUILD checkout.
- * Inserts ONLY internal bundle components.
- */
 export const createOrderTransaction = async ({
   userId,
-  items, // always [{ component_id: null, qty: 1, price_each, category: "build_bundle", build_id }]
+  items, // [{ component_id:null, qty:1, price_each, category:"build_bundle", build_id }]
   payment_method = "cod",
   notes = null,
 }) => {
@@ -30,20 +26,16 @@ export const createOrderTransaction = async ({
   try {
     await client.query("BEGIN");
 
-    // Grab first item (this is always the build bundle)
+    // Always 1 saved build per checkout
     const it = items[0];
     const buildId = it.build_id;
 
-    if (!buildId) {
-      throw new Error("Missing build_id in createOrderTransaction");
-    }
+    if (!buildId) throw new Error("Missing build_id");
 
-    // Load all internal components inside the saved build
+    // Load all internal components inside saved build
     const parts = await Builder.getBuildItems(buildId);
-
-    if (!parts || parts.length === 0) {
+    if (!parts || parts.length === 0)
       throw new Error("Build has no components");
-    }
 
     // ---------------------------------------
     // STOCK VALIDATION
@@ -104,15 +96,15 @@ export const createOrderTransaction = async ({
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         `,
         [
-          order.id,
-          bi.component_id,
-          bi.quantity || 1,
-          bi.price || bi.price_each || 0,
-          bi.category || bi.component_category,
-          buildId,
-          bi.name || bi.component_name || null,
-          bi.image_url || bi.component_image || null,
-          bi.category || bi.component_category || null,
+          order.id, // order_id
+          bi.component_id, // component_id
+          bi.quantity || 1, // quantity
+          bi.price || bi.price_each || 0, // price_each
+          bi.category || bi.component_category || null, // category
+          buildId, // build_id
+          bi.name || bi.component_name || null, // component_name
+          bi.image_url || bi.component_image || null, // component_image
+          bi.category || bi.component_category || null, // component_category
         ]
       );
 
@@ -177,6 +169,7 @@ export const getOrderItems = async (orderId) => {
         oi.category,
         oi.created_at,
 
+        -- Prefer saved snapshot, fallback to component table
         COALESCE(oi.component_name, c.name) AS component_name,
         COALESCE(oi.component_image, c.image_url) AS component_image,
         COALESCE(oi.component_category, c.category) AS component_category
@@ -193,7 +186,7 @@ export const getOrderItems = async (orderId) => {
 };
 
 // -----------------------------------------------------------------------------
-// ADMIN: UPDATE ORDER STATUS
+// ADMIN — UPDATE STATUS
 // -----------------------------------------------------------------------------
 
 export const updateOrderStatusDB = async (orderId, status) => {
@@ -207,11 +200,9 @@ export const updateOrderStatusDB = async (orderId, status) => {
   ];
 
   const normalized = String(status).trim().toLowerCase();
-  if (!valid.includes(normalized)) {
-    throw new Error(`Invalid order status: ${status}`);
-  }
+  if (!valid.includes(normalized)) throw new Error(`Invalid status: ${status}`);
 
-  const timestampFields = {
+  const timestamps = {
     paid: "paid_at",
     shipped: "shipped_at",
     completed: "completed_at",
@@ -219,17 +210,14 @@ export const updateOrderStatusDB = async (orderId, status) => {
     refunded: "refunded_at",
   };
 
-  const timestampColumn = timestampFields[normalized] || null;
+  const tsField = timestamps[normalized] || null;
 
-  const setParts = [`status = $1`, `updated_at = NOW()`];
-
-  if (timestampColumn) {
-    setParts.push(`${timestampColumn} = NOW()`);
-  }
+  const set = [`status = $1`, `updated_at = NOW()`];
+  if (tsField) set.push(`${tsField} = NOW()`);
 
   const sql = `
     UPDATE orders
-    SET ${setParts.join(", ")}
+    SET ${set.join(", ")}
     WHERE id = $2
     RETURNING *
   `;
