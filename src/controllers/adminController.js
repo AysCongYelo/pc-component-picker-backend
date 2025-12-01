@@ -207,3 +207,40 @@ export const adminLowStock = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
+/**
+ * Delete an order + its items
+ */
+export const adminDeleteOrder = async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    // 1. Delete order items first (required by FK)
+    const { error: itemsErr } = await supabase
+      .from("order_items")
+      .delete()
+      .eq("order_id", orderId);
+
+    if (itemsErr) throw itemsErr;
+
+    // 2. Delete order
+    const { data, error } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Order deleted successfully",
+      order: data,
+    });
+  } catch (err) {
+    console.error("adminDeleteOrder:", err.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+};

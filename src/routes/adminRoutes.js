@@ -14,6 +14,7 @@ import {
   adminGetOrderDetail,
   adminUpdateOrderStatus,
   adminLowStock,
+  adminDeleteOrder,
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -59,6 +60,8 @@ router.get("/orders/:id", adminGetOrderDetail);
 
 // Update order status (e.g., pending → shipped)
 router.put("/orders/:id/status", adminUpdateOrderStatus);
+
+router.delete("/orders/:id", adminDeleteOrder);
 
 /**
  * INVENTORY MONITORING
