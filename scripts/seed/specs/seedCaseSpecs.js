@@ -195,6 +195,47 @@ async function seedCaseSpecs() {
         side_panel: "Tempered Glass",
       },
     },
+    // ⭐ ADD-ON BUDGET CASE SPECS
+    {
+      name: "Tecware Nexus M",
+      specs: {
+        form_factor: "Micro-ATX, Mini-ITX",
+        max_gpu_length: 330,
+        max_cpu_cooler_height: 160,
+        psu_shroud: true,
+        side_panel: "Tempered Glass",
+      },
+    },
+    {
+      name: "Tecware NEO M",
+      specs: {
+        form_factor: "Micro-ATX, Mini-ITX",
+        max_gpu_length: 335,
+        max_cpu_cooler_height: 160,
+        psu_shroud: true,
+        side_panel: "Tempered Glass",
+      },
+    },
+    {
+      name: "Deepcool Matrexx 30",
+      specs: {
+        form_factor: "Micro-ATX, Mini-ITX",
+        max_gpu_length: 250,
+        max_cpu_cooler_height: 151,
+        psu_shroud: false,
+        side_panel: "Acrylic",
+      },
+    },
+    {
+      name: "MicroATX Compact Case",
+      specs: {
+        form_factor: "Micro-ATX, Mini-ITX",
+        max_gpu_length: 240,
+        max_cpu_cooler_height: 150,
+        psu_shroud: false,
+        side_panel: "Acrylic",
+      },
+    },
   ];
 
   // 4️⃣ Attach component IDs + structure output

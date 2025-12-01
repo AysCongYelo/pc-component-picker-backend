@@ -130,6 +130,42 @@ async function seedGPU() {
       stock: 15,
       image_url: getPublicUrl("gpu/amd_rx_7600_8gb.jpg"),
     },
+    // ⭐ ADD-ON GPUs (Budget to Midrange)
+    {
+      name: "NVIDIA GeForce GTX 1650 4GB",
+      brand: "NVIDIA",
+      price: 8999,
+      stock: 20,
+      image_url: getPublicUrl("gpu/nvidia_gtx_1650_4gb.jpg"),
+    },
+    {
+      name: "AMD Radeon RX 580 8GB",
+      brand: "AMD",
+      price: 6499,
+      stock: 18,
+      image_url: getPublicUrl("gpu/amd_rx_580_8gb.jpg"),
+    },
+    {
+      name: "Intel ARC A750 8GB",
+      brand: "Intel",
+      price: 11999,
+      stock: 15,
+      image_url: getPublicUrl("gpu/intel_arc_a750_8gb.jpg"),
+    },
+    {
+      name: "NVIDIA GeForce RTX 3050 6GB",
+      brand: "NVIDIA",
+      price: 12999,
+      stock: 16,
+      image_url: getPublicUrl("gpu/nvidia_rtx_3050_6gb.jpg"),
+    },
+    {
+      name: "NVIDIA GeForce RTX 3050 8GB",
+      brand: "NVIDIA",
+      price: 14999,
+      stock: 10,
+      image_url: getPublicUrl("gpu/nvidia_rtx_3050_8gb.jpg"),
+    },
   ];
 
   // 3️⃣ Insert via helper

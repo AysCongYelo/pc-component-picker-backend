@@ -126,6 +126,35 @@ async function seedCase() {
       stock: 12,
       image_url: getPublicUrl("case/nzxt_h9_flow.jpg"),
     },
+    // ⭐ ADD-ON BUDGET CASES
+    {
+      name: "Tecware Nexus M",
+      brand: "Tecware",
+      price: 1499,
+      stock: 30,
+      image_url: getPublicUrl("case/tecware_nexus_m.jpg"),
+    },
+    {
+      name: "Tecware NEO M",
+      brand: "Tecware",
+      price: 1599,
+      stock: 28,
+      image_url: getPublicUrl("case/tecware_neo_m.jpg"),
+    },
+    {
+      name: "Deepcool Matrexx 30",
+      brand: "Deepcool",
+      price: 1399,
+      stock: 25,
+      image_url: getPublicUrl("case/deepcool_matrexx_30.jpg"),
+    },
+    {
+      name: "MicroATX Compact Case",
+      brand: "Generic",
+      price: 1199,
+      stock: 40,
+      image_url: getPublicUrl("case/generic_microatx_case.jpg"),
+    },
   ];
 
   // 3️⃣ Insert components using the safe helper

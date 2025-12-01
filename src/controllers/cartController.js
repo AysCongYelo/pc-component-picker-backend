@@ -98,41 +98,52 @@ export const addBuildToCart = async (req, res) => {
     const userId = req.user.id;
     const buildId = req.params.buildId;
 
-    // 1. Get build with ownership check
+    // 1. Fetch the saved build
     const build = await Builder.getFullBuildById(buildId, userId);
     if (!build) {
       return res.status(404).json({ error: "Build not found" });
     }
 
-    // 2. Expand components & compute total price
+    // 2. Expand components
     const expanded = await Builder.expandComponents(build.components);
-    const totalPrice = Object.values(expanded).reduce(
-      (sum, comp) => sum + Number(comp.price || 0),
+
+    const bundle_items = Object.entries(expanded).map(([category, comp]) => ({
+      category,
+      name: comp.name,
+      price: comp.price,
+      image_url: comp.image_url,
+    }));
+
+    // 3. Compute total price
+    const totalPrice = bundle_items.reduce(
+      (sum, item) => sum + Number(item.price || 0),
       0
     );
 
-    // count how many components in the build
-    const count = Object.keys(expanded).length;
-
-    // 3. Insert bundled build into cart
+    // 4. Insert bundle row into DB
     const bundle = await Cart.addBuildBundle({
       user_id: userId,
       build_id: build.id,
       build_name: build.name,
       build_total_price: totalPrice,
-      bundle_item_count: count, // ✔ now valid
+      bundle_item_count: bundle_items.length,
+      bundle_items, // ⭐ RAW ARRAY (not string)
     });
 
     return res.json({
       success: true,
       message: "Build added to cart as bundled item.",
-      item: bundle,
+      item: {
+        ...bundle,
+        bundle_items, // send raw array to frontend
+      },
     });
   } catch (err) {
-    console.error("addBuildToCart:", err.message);
+    console.error("addBuildToCart:", err);
     return res.status(500).json({ error: "Server error" });
   }
 };
+
 /* ============================================================================
     CART — ADD TEMP BUILD (NO SAVE REQUIRED)
   ============================================================================ */

@@ -463,6 +463,48 @@ async function seedMotherboardSpecs() {
         pcie_slots: ["PCIe 5.0 x16"],
       },
     },
+    {
+      name: "Gigabyte A520M DS3H",
+      specs: {
+        socket: "AM4",
+        form_factor: "Micro-ATX",
+        chipset: "A520",
+        memory_slots: 2,
+        max_memory_gb: 64,
+        max_memory_speed_mhz: 4733,
+        memory_type: "DDR4",
+        storage_support: ["SATA", "NVMe"],
+        pcie_slots: ["PCIe 3.0 x16"],
+      },
+    },
+    {
+      name: "MSI B450M PRO-VDH MAX",
+      specs: {
+        socket: "AM4",
+        form_factor: "Micro-ATX",
+        chipset: "B450",
+        memory_slots: 4,
+        max_memory_gb: 128,
+        max_memory_speed_mhz: 4133,
+        memory_type: "DDR4",
+        storage_support: ["SATA", "NVMe"],
+        pcie_slots: ["PCIe 3.0 x16"],
+      },
+    },
+    {
+      name: "ASUS Prime H610M-E",
+      specs: {
+        socket: "LGA1700",
+        form_factor: "Micro-ATX",
+        chipset: "H610",
+        memory_slots: 2,
+        max_memory_gb: 64,
+        max_memory_speed_mhz: 3200,
+        memory_type: "DDR4",
+        storage_support: ["SATA", "NVMe"],
+        pcie_slots: ["PCIe 4.0 x16"],
+      },
+    },
   ];
 
   // 4️⃣ Normalize payload

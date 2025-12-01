@@ -236,6 +236,27 @@ async function seedMotherboard() {
       price: 14999,
       stock: 18,
       image_url: getPublicUrl("motherboard/gigabyte_z890_gaming_x.jpg"),
+    }, // ⭐ ADD-ON BUDGET MOTHERBOARDS
+    {
+      name: "Gigabyte A520M DS3H",
+      brand: "Gigabyte",
+      price: 2999,
+      stock: 25,
+      image_url: getPublicUrl("motherboard/gigabyte_a520m_ds3h.jpg"),
+    },
+    {
+      name: "MSI B450M PRO-VDH MAX",
+      brand: "MSI",
+      price: 3499,
+      stock: 25,
+      image_url: getPublicUrl("motherboard/msi_b450m_pro_vdh_max.jpg"),
+    },
+    {
+      name: "ASUS Prime H610M-E",
+      brand: "ASUS",
+      price: 3299,
+      stock: 30,
+      image_url: getPublicUrl("motherboard/asus_prime_h610m_e.jpg"),
     },
   ];
 

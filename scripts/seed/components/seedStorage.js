@@ -183,6 +183,28 @@ async function seedStorage() {
       stock: 34,
       image_url: getPublicUrl("storage/teamgroup_gx2_512gb.jpg"),
     },
+    // ⭐ ADD-ON BUDGET NVMe SSDs
+    {
+      name: "Lexar NM620 512GB NVMe M.2",
+      brand: "Lexar",
+      price: 1799,
+      stock: 30,
+      image_url: getPublicUrl("storage/lexar_nm620_512gb.jpg"),
+    },
+    {
+      name: "Kingston NV2 500GB NVMe M.2",
+      brand: "Kingston",
+      price: 1599,
+      stock: 40,
+      image_url: getPublicUrl("storage/kingston_nv2_500gb.jpg"),
+    },
+    {
+      name: "TeamGroup MP33 512GB NVMe M.2",
+      brand: "TeamGroup",
+      price: 1799,
+      stock: 35,
+      image_url: getPublicUrl("storage/teamgroup_mp33_512gb.jpg"),
+    },
   ];
 
   // 3️⃣ Insert

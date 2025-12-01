@@ -130,6 +130,35 @@ async function seedPSU() {
       stock: 22,
       image_url: getPublicUrl("psu/seasonic_core_gm_650_gold.jpg"),
     },
+    // ⭐ ADD-ON BUDGET PSUs
+    {
+      name: "Corsair CV550 550W 80+ Bronze",
+      brand: "Corsair",
+      price: 2499,
+      stock: 30,
+      image_url: getPublicUrl("psu/corsair_cv550_bronze.jpg"),
+    },
+    {
+      name: "Corsair CV650 650W 80+ Bronze",
+      brand: "Corsair",
+      price: 2699,
+      stock: 28,
+      image_url: getPublicUrl("psu/corsair_cv650_bronze.jpg"),
+    },
+    {
+      name: "Cooler Master Elite V3 600W",
+      brand: "Cooler Master",
+      price: 1799,
+      stock: 35,
+      image_url: getPublicUrl("psu/cooler_master_elite_v3_600w.jpg"),
+    },
+    {
+      name: "Seasonic S12III 550W 80+ Bronze",
+      brand: "Seasonic",
+      price: 2099,
+      stock: 25,
+      image_url: getPublicUrl("psu/seasonic_s12iii_550w_bronze.jpg"),
+    },
   ];
 
   // Insert

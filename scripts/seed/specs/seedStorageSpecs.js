@@ -259,6 +259,34 @@ async function seedStorageSpecs() {
         form_factor: "2.5-INCH",
       },
     },
+    // ⭐ ADD-ON BUDGET NVMe SPECS
+    {
+      name: "Lexar NM620 512GB NVMe M.2",
+      specs: {
+        capacity_gb: 512,
+        type: "SSD",
+        interface: "NVME",
+        form_factor: "M.2",
+      },
+    },
+    {
+      name: "Kingston NV2 500GB NVMe M.2",
+      specs: {
+        capacity_gb: 500,
+        type: "SSD",
+        interface: "NVME",
+        form_factor: "M.2",
+      },
+    },
+    {
+      name: "TeamGroup MP33 512GB NVMe M.2",
+      specs: {
+        capacity_gb: 512,
+        type: "SSD",
+        interface: "NVME",
+        form_factor: "M.2",
+      },
+    },
   ];
 
   // 4️⃣ Build final payload

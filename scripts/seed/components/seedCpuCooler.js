@@ -132,6 +132,42 @@ async function seedCooler() {
       stock: 18,
       image_url: getPublicUrl("cpu_cooler/corsair_h100i_rgb_elite_240.jpg"),
     },
+    // ⭐ ADD-ON COOLERS (new items only)
+    {
+      name: "Deepcool GAMMAXX 400 V2",
+      brand: "Deepcool",
+      price: 1199,
+      stock: 20,
+      image_url: getPublicUrl("cpu_cooler/deepcool_gammaxx_400_v2.jpg"),
+    },
+    {
+      name: "Deepcool AK400",
+      brand: "Deepcool",
+      price: 1899,
+      stock: 20,
+      image_url: getPublicUrl("cpu_cooler/deepcool_ak400.jpg"),
+    },
+    {
+      name: "ID-COOLING SE-214-XT",
+      brand: "ID-COOLING",
+      price: 899,
+      stock: 25,
+      image_url: getPublicUrl("cpu_cooler/id_cooling_se_214_xt.jpg"),
+    },
+    {
+      name: "Thermalright Assassin X 120 SE",
+      brand: "Thermalright",
+      price: 1299,
+      stock: 18,
+      image_url: getPublicUrl("cpu_cooler/thermalright_assassin_x_120_se.jpg"),
+    },
+    {
+      name: "Lian Li Galahad II 240",
+      brand: "Lian Li",
+      price: 5799,
+      stock: 12,
+      image_url: getPublicUrl("cpu_cooler/lian_li_galahad_ii_240.jpg"),
+    },
   ];
 
   // 3️⃣ Insert using safe helper

@@ -227,6 +227,66 @@ async function seedGpuSpecs() {
         ports: ["3x DisplayPort 2.1", "1x HDMI 2.1"],
       },
     },
+    {
+      name: "NVIDIA GeForce GTX 1650 4GB",
+      specs: {
+        chipset: "Turing",
+        memory_size: "4 GB GDDR5",
+        core_clock: 1485,
+        boost_clock: 1665,
+        tdp: 75,
+        length: 229,
+        ports: ["1x HDMI 2.0b", "1x DisplayPort 1.4", "1x DVI-D"],
+      },
+    },
+    {
+      name: "AMD Radeon RX 580 8GB",
+      specs: {
+        chipset: "Polaris",
+        memory_size: "8 GB GDDR5",
+        core_clock: 1257,
+        boost_clock: 1340,
+        tdp: 185,
+        length: 241,
+        ports: ["1x HDMI 2.0", "3x DisplayPort 1.4"],
+      },
+    },
+    {
+      name: "Intel ARC A750 8GB",
+      specs: {
+        chipset: "Intel Arc Alchemist",
+        memory_size: "8 GB GDDR6",
+        core_clock: 2050,
+        boost_clock: 2300,
+        tdp: 225,
+        length: 267,
+        ports: ["2x DisplayPort 2.0", "1x HDMI 2.1", "1x USB-C"],
+      },
+    },
+    {
+      name: "NVIDIA GeForce RTX 3050 6GB",
+      specs: {
+        chipset: "Ampere",
+        memory_size: "6 GB GDDR6",
+        core_clock: 1552,
+        boost_clock: 1777,
+        tdp: 115,
+        length: 242,
+        ports: ["1x HDMI 2.1", "3x DisplayPort 1.4a"],
+      },
+    },
+    {
+      name: "NVIDIA GeForce RTX 3050 8GB",
+      specs: {
+        chipset: "Ampere",
+        memory_size: "8 GB GDDR6",
+        core_clock: 1500,
+        boost_clock: 1777,
+        tdp: 130,
+        length: 242,
+        ports: ["1x HDMI 2.1", "3x DisplayPort 1.4a"],
+      },
+    },
   ];
 
   // 4️⃣ Build insertable payload

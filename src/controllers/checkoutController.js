@@ -13,14 +13,6 @@ import pool from "../db.js";
    CHECKOUT — SELECTIVE CART CHECKOUT + STOCK VALIDATION
 ============================================================================ */
 
-/**
- * Checkout selected cart items.
- * - Supports selective checkout (item_ids array)
- * - Validates stock for individual component items
- * - Deducts stock
- * - Creates order + order_items
- * - Removes only checked-out items from cart
- */
 export const checkout = async (req, res) => {
   const client = await pool.connect();
 
@@ -44,10 +36,10 @@ export const checkout = async (req, res) => {
     }
 
     /* -----------------------------------------------------------------------
-       STOCK VALIDATION (only for real components)
+       STOCK VALIDATION — COMPONENT ITEMS
     ----------------------------------------------------------------------- */
     for (const item of items) {
-      if (!item.component_id) continue; // skip build bundles
+      if (!item.component_id) continue; // Skip bundles
 
       const { rows } = await client.query(
         `SELECT stock FROM components WHERE id = $1`,
@@ -60,6 +52,30 @@ export const checkout = async (req, res) => {
         return res.status(400).json({
           error: `Not enough stock for ${item.component_name}. Remaining: ${stock}`,
         });
+      }
+    }
+
+    /* -----------------------------------------------------------------------
+       STOCK VALIDATION — BUILD BUNDLES (validate internal parts)
+    ----------------------------------------------------------------------- */
+    for (const item of items) {
+      if (item.category === "build_bundle" && item.build_id) {
+        const bundleItems = await Builder.getBuildItems(item.build_id);
+
+        for (const bi of bundleItems) {
+          const { rows } = await client.query(
+            `SELECT stock FROM components WHERE id = $1`,
+            [bi.component_id]
+          );
+
+          const stock = rows[0]?.stock ?? 0;
+
+          if (stock < bi.quantity) {
+            return res.status(400).json({
+              error: `Not enough stock for ${bi.name} inside the saved build. Remaining: ${stock}`,
+            });
+          }
+        }
       }
     }
 
@@ -85,14 +101,12 @@ export const checkout = async (req, res) => {
     const order = orderRows[0];
 
     /* -----------------------------------------------------------------------
-       INSERT ORDER ITEMS + DEDUCT STOCK
-       - For component items: component_id set, build_id null
-       - For bundle items: component_id null, build_id set
+       INSERT ORDER ITEMS & DEDUCT STOCK
     ----------------------------------------------------------------------- */
     for (const item of items) {
       const isBundle = item.category === "build_bundle";
 
-      // Insert into order_items
+      // INSERT order_items
       await client.query(
         `
           INSERT INTO order_items
@@ -109,7 +123,9 @@ export const checkout = async (req, res) => {
         ]
       );
 
-      // Deduct stock for actual components
+      /* -------------------------------------------------------------
+         DEDUCT STOCK — COMPONENT ITEMS
+      ------------------------------------------------------------- */
       if (!isBundle && item.component_id) {
         await client.query(
           `
@@ -119,6 +135,24 @@ export const checkout = async (req, res) => {
           `,
           [Number(item.quantity || 1), item.component_id]
         );
+      }
+
+      /* -------------------------------------------------------------
+         DEDUCT STOCK — BUILD BUNDLES (internal multiparts)
+      ------------------------------------------------------------- */
+      if (isBundle && item.build_id) {
+        const bundleItems = await Builder.getBuildItems(item.build_id);
+
+        for (const bi of bundleItems) {
+          await client.query(
+            `
+              UPDATE components
+                 SET stock = stock - $1
+               WHERE id = $2
+            `,
+            [Number(bi.quantity || 1), bi.component_id]
+          );
+        }
       }
     }
 
@@ -156,33 +190,23 @@ export const checkout = async (req, res) => {
    CHECKOUT — SAVED BUILD (BUNDLED MODE)
 ============================================================================ */
 
-/**
- * Checkout a saved user build as a single bundled item.
- * - Converts full build into one bundled order item
- * - Calculates total price from all component prices
- * - Uses a database transaction (createOrderTransaction)
- */
 export const checkoutBuild = async (req, res) => {
   try {
     const userId = req.user.id;
     const buildId = req.params.buildId;
     const { payment_method, notes } = req.body;
 
-    // fetch the saved build (must be owned by user)
     const build = await Builder.getUserBuildById(userId, buildId);
     if (!build) {
       return res.status(404).json({ error: "Build not found" });
     }
 
-    // expand components (this returns an object keyed by category)
     const expanded = await Builder.expandComponents(build.components || {});
 
-    // compute total safely (ignore metadata keys)
     const totalPrice = Object.values(expanded)
       .filter((c) => c && typeof c === "object" && c.price !== undefined)
       .reduce((sum, comp) => sum + Number(comp.price || 0), 0);
 
-    // Use "quantity" (not "qty") and include build_id for bundle items
     const items = [
       {
         component_id: null,
@@ -193,7 +217,6 @@ export const checkoutBuild = async (req, res) => {
       },
     ];
 
-    // create order using your order transaction helper
     const order = await createOrderTransaction({
       userId,
       items,
@@ -201,11 +224,9 @@ export const checkoutBuild = async (req, res) => {
       notes: notes || null,
     });
 
-    // mark build as removed from saved list (do NOT delete the row) to avoid FK issues
     try {
       await Builder.removeFromSaved(userId, buildId);
     } catch (e) {
-      // non-fatal: log but don't fail the whole checkout (order already created)
       console.warn("removeFromSaved failed:", e.message || e);
     }
 

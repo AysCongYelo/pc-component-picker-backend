@@ -119,16 +119,54 @@ export const resetTempBuild = async (userId) => {
 // -----------------------------------------------------------------------------
 // EXPAND COMPONENTS
 // -----------------------------------------------------------------------------
-export const expandComponents = async (components) => {
+// allowMissing = true  → TEMP build (placeholder allowed)
+// allowMissing = false → SAVED build (hide missing components)
+export const expandComponents = async (
+  components = {},
+  allowMissing = true
+) => {
   const expanded = {};
+  const sourceId = components.__source_build_id || null;
 
-  let sourceId = components?.__source_build_id || null;
-
-  for (const [category, id] of Object.entries(components || {})) {
+  for (const [category, id] of Object.entries(components)) {
     if (category === "__source_build_id") continue;
 
+    // If null — TEMP build = show placeholder; SAVED build = skip
+    if (!id) {
+      if (allowMissing) {
+        expanded[category] = {
+          id: null,
+          name: "Missing Component",
+          price: 0,
+          image_url: null,
+          category,
+          specs: {},
+        };
+      }
+      continue;
+    }
+
     const comp = await getComponentWithSpecsById(id);
-    if (comp) expanded[category] = { ...comp, category };
+
+    // If database missing — TEMP = placeholder, SAVED = skip
+    if (!comp) {
+      console.warn(`⚠ Missing component → id: ${id} (category: ${category})`);
+
+      if (allowMissing) {
+        expanded[category] = {
+          id,
+          name: "Missing Component",
+          price: 0,
+          image_url: null,
+          category,
+          specs: {},
+        };
+      }
+      continue;
+    }
+
+    // Normal component
+    expanded[category] = { ...comp, category };
   }
 
   if (sourceId) expanded.__source_build_id = sourceId;
@@ -165,7 +203,21 @@ export const saveUserBuild = async (
   { name, components, total_price, power_usage, compatibility = "ok" }
 ) => {
   // 1. Expand components to get full info including image URLs
-  const expanded = await expandComponents(components);
+  // 🛑 0. Clean components (remove null/missing)
+  const filteredComponents = Object.fromEntries(
+    Object.entries(components || {}).filter(([key, value]) => {
+      if (!value) return false;
+      if (
+        typeof value === "object" &&
+        (value.id === null || value.name === "Missing Component")
+      )
+        return false;
+      return true;
+    })
+  );
+
+  // 1. Expand ONLY the real components
+  const expanded = await expandComponents(filteredComponents, false);
 
   // 2. Pick CASE image → fallback to other components
   let buildImage = null;
@@ -191,7 +243,7 @@ export const saveUserBuild = async (
     [
       userId,
       name || "My Build",
-      JSON.stringify(components || {}),
+      JSON.stringify(filteredComponents),
       total_price,
       power_usage,
       compatibility,
@@ -283,4 +335,31 @@ export const getFullBuildById = async (buildId, userId) => {
   );
 
   return rows[0] || null;
+};
+// -----------------------------------------------------------------------------
+// BUILD ITEM EXPANSION FOR CHECKOUT (used in cart checkout)
+// -----------------------------------------------------------------------------
+export const getBuildItems = async (buildId) => {
+  // 1. Fetch the raw JSON components from saved build
+  const { rows } = await pool.query(
+    `SELECT components FROM user_builds WHERE id = $1 LIMIT 1`,
+    [buildId]
+  );
+
+  const comps = rows[0]?.components;
+  if (!comps) return [];
+
+  // 2. Expand using your existing logic
+  const expanded = await expandComponents(comps, false);
+
+  // 3. Convert expanded object → array of clean items
+  return Object.entries(expanded)
+    .filter(([key, comp]) => key !== "__source_build_id" && comp && comp.id)
+    .map(([key, comp]) => ({
+      component_id: comp.id,
+      name: comp.name,
+      price: Number(comp.price || 0),
+      quantity: 1, // ✔ saved builds always 1 per category
+      category: key,
+    }));
 };

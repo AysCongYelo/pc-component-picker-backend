@@ -44,7 +44,7 @@ export const getOrCreateCart = async (userId) => {
  *  - regular components
  *  - bundled saved builds
  */
-import * as Builder from "./builderModel.js";
+import * as Builder from "../models/builderModel.js";
 
 export const getCartItems = async (userId) => {
   const { rows } = await pool.query(
@@ -61,6 +61,7 @@ export const getCartItems = async (userId) => {
         ci.category,
         ci.components,
         ci.bundle_item_count,
+        ci.bundle_items,
         ci.updated_at,
 
         -- REAL COMPONENT DATA
@@ -94,11 +95,13 @@ export const getCartItems = async (userId) => {
       if (fullBuild && fullBuild.components) {
         const expanded = await Builder.expandComponents(fullBuild.components);
 
-        row.bundle_items = Object.values(expanded).map((comp) => ({
-          category: comp.category,
-          name: comp.name,
-          price: comp.price,
-        }));
+        row.bundle_items = Object.entries(expanded)
+          .filter(([_, comp]) => comp && comp.name && comp.price !== undefined)
+          .map(([cat, comp]) => ({
+            category: cat,
+            name: comp.name,
+            price: Number(comp.price) || 0,
+          }));
       } else {
         row.bundle_items = [];
       }
@@ -146,16 +149,34 @@ export const addBuildBundle = async ({
   build_id,
   build_name,
   build_total_price,
-  bundle_item_count, // <── ADD THIS
+  bundle_item_count,
+  bundle_items,
 }) => {
   const { rows } = await pool.query(
     `
-      INSERT INTO cart_items
-        (user_id, build_id, build_name, price, quantity, category, bundle_item_count, updated_at)
-      VALUES ($1, $2, $3, $4, 1, 'build_bundle', $5, NOW())
+      INSERT INTO cart_items (
+        user_id,
+        build_id,
+        build_name,
+        price,
+        build_total_price,
+        quantity,
+        category,
+        bundle_item_count,
+        bundle_items,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $4, 1, 'build_bundle', $5, $6::jsonb, NOW())
       RETURNING *
     `,
-    [user_id, build_id, build_name, build_total_price, bundle_item_count]
+    [
+      user_id,
+      build_id,
+      build_name,
+      build_total_price,
+      bundle_item_count,
+      JSON.stringify(bundle_items), // store JSON array
+    ]
   );
 
   return rows[0];

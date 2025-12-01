@@ -195,6 +195,56 @@ async function seedCpuCoolerSpecs() {
         compatible_sockets: ["LGA1700", "LGA1200", "AM5", "AM4"],
       },
     },
+    {
+      name: "Deepcool GAMMAXX 400 V2",
+      specs: {
+        type: "Air Cooler",
+        fan_rpm: "500–1650 RPM",
+        noise_level: "30 dBA",
+        height: 155,
+        compatible_sockets: ["LGA1700", "LGA115x", "AM5", "AM4"],
+      },
+    },
+    {
+      name: "Deepcool AK400",
+      specs: {
+        type: "Air Cooler",
+        fan_rpm: "500–1850 RPM",
+        noise_level: "29 dBA",
+        height: 155,
+        compatible_sockets: ["LGA1700", "LGA115x", "AM5", "AM4"],
+      },
+    },
+    {
+      name: "ID-COOLING SE-214-XT",
+      specs: {
+        type: "Air Cooler",
+        fan_rpm: "500–1800 RPM",
+        noise_level: "26.4 dBA",
+        height: 157,
+        compatible_sockets: ["LGA1700", "LGA115x", "AM5", "AM4"],
+      },
+    },
+    {
+      name: "Thermalright Assassin X 120 SE",
+      specs: {
+        type: "Air Cooler",
+        fan_rpm: "500–1500 RPM",
+        noise_level: "25.6 dBA",
+        height: 155,
+        compatible_sockets: ["LGA1700", "LGA115x", "AM5", "AM4"],
+      },
+    },
+    {
+      name: "Lian Li Galahad II 240",
+      specs: {
+        type: "Liquid Cooler (AIO)",
+        fan_rpm: "300–1900 RPM",
+        noise_level: "28.6 dBA",
+        height: 240,
+        compatible_sockets: ["LGA1700", "LGA1200", "AM5", "AM4"],
+      },
+    },
   ];
 
   // 4️⃣ Attach IDs + format specs

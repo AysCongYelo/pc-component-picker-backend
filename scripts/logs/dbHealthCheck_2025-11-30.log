@@ -1,0 +1,22 @@
+🩺 DB Health Check Report — 12/1/2025, 1:02:46 AM
+───────────────────────────────────────
+📦 Total Components: 171
+🖼️ Missing image_url: 0
+📁 Missing image_path: 0
+🚫 Orphaned files: 22
+⚠️ Missing in storage: 0
+───────────────────────────────────────
+
+Sample Orphans:
+memory/adata_xpg_lancer_rgb_ddr5_32gb_2x16gb_6000mhz.jpg
+memory/apacer_nox_rgb_ddr5_32gb_2x16gb_6000mhz.jpg
+memory/corsair_vengeance_rgb_ddr5_32gb_2x16gb_6000mhz.webp
+memory/crucial_pro_ddr5_32gb_2x16gb_5600mhz.jpg
+memory/gskill_trident_z_rgb_ddr5_32gb_2x16gb_6000mhz.jpg
+memory/kingston_fury_beast_ddr5_16gb_2x8gb_5600mhz.webp
+memory/lexar_ares_rgb_ddr5_32gb_2x16gb_6400mhz.jpg
+memory/patriot_viper_steel_ddr5_16gb_2x8gb_5600mhz.jpg
+memory/pny_xlr8_gaming_ddr5_32gb_2x16gb_6000mhz.jpg
+memory/teamgroup_t_force_delta_rgb_ddr5_32gb_2x16gb_6400mhz.jpg
+
+Sample Missing:

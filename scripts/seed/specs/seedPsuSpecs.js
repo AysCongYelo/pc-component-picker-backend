@@ -206,6 +206,42 @@ async function seedPsuSpecs() {
         form_factor: "ATX",
       },
     },
+    {
+      name: "Corsair CV550 550W 80+ Bronze",
+      specs: {
+        wattage: 550,
+        efficiency_rating: "80+ Bronze",
+        modular: "Non-Modular",
+        form_factor: "ATX",
+      },
+    },
+    {
+      name: "Corsair CV650 650W 80+ Bronze",
+      specs: {
+        wattage: 650,
+        efficiency_rating: "80+ Bronze",
+        modular: "Non-Modular",
+        form_factor: "ATX",
+      },
+    },
+    {
+      name: "Cooler Master Elite V3 600W",
+      specs: {
+        wattage: 600,
+        efficiency_rating: "Standard",
+        modular: "Non-Modular",
+        form_factor: "ATX",
+      },
+    },
+    {
+      name: "Seasonic S12III 550W 80+ Bronze",
+      specs: {
+        wattage: 550,
+        efficiency_rating: "80+ Bronze",
+        modular: "Non-Modular",
+        form_factor: "ATX",
+      },
+    },
   ];
 
   // 4️⃣ Normalize + convert into payload
