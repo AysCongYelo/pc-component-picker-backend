@@ -244,3 +244,34 @@ export const adminDeleteOrder = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
+/**
+ * Update user status (active / banned)
+ */
+export const adminUpdateUserStatus = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { status } = req.body;
+
+    if (!["active", "inactive", "banned"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status value" });
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ status })
+      .eq("id", userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      message: "User status updated successfully",
+      user: data,
+    });
+  } catch (err) {
+    console.error("adminUpdateUserStatus:", err.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
