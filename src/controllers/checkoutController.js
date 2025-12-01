@@ -25,7 +25,7 @@ export const checkout = async (req, res) => {
       return res.status(400).json({ error: "Cart is empty" });
     }
 
-    // Selective checkout — if none provided, checkout everything
+    // Selective checkout
     const items =
       Array.isArray(item_ids) && item_ids.length > 0
         ? cartItems.filter((i) => item_ids.includes(i.id))
@@ -39,7 +39,7 @@ export const checkout = async (req, res) => {
        STOCK VALIDATION — COMPONENT ITEMS
     ----------------------------------------------------------------------- */
     for (const item of items) {
-      if (!item.component_id) continue; // Skip bundles
+      if (!item.component_id) continue;
 
       const { rows } = await client.query(
         `SELECT stock FROM components WHERE id = $1`,
@@ -56,25 +56,25 @@ export const checkout = async (req, res) => {
     }
 
     /* -----------------------------------------------------------------------
-       STOCK VALIDATION — BUILD BUNDLES (validate internal parts)
+       STOCK VALIDATION — BUILD BUNDLES
     ----------------------------------------------------------------------- */
     for (const item of items) {
-      if (item.category === "build_bundle" && item.build_id) {
-        const bundleItems = await Builder.getBuildItems(item.build_id);
+      if (item.category !== "build_bundle" || !item.build_id) continue;
 
-        for (const bi of bundleItems) {
-          const { rows } = await client.query(
-            `SELECT stock FROM components WHERE id = $1`,
-            [bi.component_id]
-          );
+      const bundleItems = await Builder.getBuildItems(item.build_id);
 
-          const stock = rows[0]?.stock ?? 0;
+      for (const bi of bundleItems) {
+        const { rows } = await client.query(
+          `SELECT stock FROM components WHERE id = $1`,
+          [bi.component_id]
+        );
 
-          if (stock < bi.quantity) {
-            return res.status(400).json({
-              error: `Not enough stock for ${bi.name} inside the saved build. Remaining: ${stock}`,
-            });
-          }
+        const stock = rows[0]?.stock ?? 0;
+
+        if (stock < bi.quantity) {
+          return res.status(400).json({
+            error: `Not enough stock for ${bi.name} inside the saved build. Remaining: ${stock}`,
+          });
         }
       }
     }
@@ -101,27 +101,67 @@ export const checkout = async (req, res) => {
     const order = orderRows[0];
 
     /* -----------------------------------------------------------------------
-       INSERT ORDER ITEMS & DEDUCT STOCK
+       INSERT ORDER ITEMS
     ----------------------------------------------------------------------- */
     for (const item of items) {
       const isBundle = item.category === "build_bundle";
 
-      // INSERT order_items
-      await client.query(
-        `
-          INSERT INTO order_items
-            (order_id, component_id, build_id, quantity, price_each, category)
-          VALUES ($1, $2, $3, $4, $5, $6)
-        `,
-        [
-          order.id,
-          isBundle ? null : item.component_id || null,
-          isBundle ? item.build_id || null : null,
-          Number(item.quantity || 1),
-          Number(item.price || 0),
-          item.category || null,
-        ]
-      );
+      /* -------------------------------------------------------------
+         NORMAL COMPONENT ITEMS
+      ------------------------------------------------------------- */
+      if (!isBundle && item.component_id) {
+        await client.query(
+          `
+            INSERT INTO order_items
+              (order_id, component_id, quantity, price_each, category)
+            VALUES ($1, $2, $3, $4, $5)
+          `,
+          [
+            order.id,
+            item.component_id,
+            Number(item.quantity || 1),
+            Number(item.price || 0),
+            item.category,
+          ]
+        );
+      }
+
+      /* -------------------------------------------------------------
+         BUILD BUNDLES → INSERT INTERNAL COMPONENTS ONLY
+      ------------------------------------------------------------- */
+      if (isBundle && item.build_id) {
+        const parts = await Builder.getBuildItems(item.build_id);
+
+        for (const bi of parts) {
+          await client.query(
+            `
+              INSERT INTO order_items (
+                order_id,
+                component_id,
+                quantity,
+                price_each,
+                category,
+                build_id,
+                component_name,
+                component_image,
+                component_category
+              )
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            `,
+            [
+              order.id,
+              bi.component_id,
+              bi.quantity || 1,
+              bi.price || bi.price_each || 0,
+              bi.category || bi.component_category,
+              item.build_id,
+              bi.name || bi.component_name || null,
+              bi.image_url || bi.component_image || null,
+              bi.category || bi.component_category || null,
+            ]
+          );
+        }
+      }
 
       /* -------------------------------------------------------------
          DEDUCT STOCK — COMPONENT ITEMS
@@ -130,25 +170,25 @@ export const checkout = async (req, res) => {
         await client.query(
           `
             UPDATE components
-               SET stock = stock - $1
-             WHERE id = $2
+            SET stock = stock - $1
+            WHERE id = $2
           `,
           [Number(item.quantity || 1), item.component_id]
         );
       }
 
       /* -------------------------------------------------------------
-         DEDUCT STOCK — BUILD BUNDLES (internal multiparts)
+         DEDUCT STOCK — BUILD BUNDLES
       ------------------------------------------------------------- */
       if (isBundle && item.build_id) {
-        const bundleItems = await Builder.getBuildItems(item.build_id);
+        const parts = await Builder.getBuildItems(item.build_id);
 
-        for (const bi of bundleItems) {
+        for (const bi of parts) {
           await client.query(
             `
               UPDATE components
-                 SET stock = stock - $1
-               WHERE id = $2
+              SET stock = stock - $1
+              WHERE id = $2
             `,
             [Number(bi.quantity || 1), bi.component_id]
           );
@@ -157,15 +197,15 @@ export const checkout = async (req, res) => {
     }
 
     /* -----------------------------------------------------------------------
-       REMOVE ONLY CHECKED-OUT CART ITEMS
+       REMOVE CHECKED-OUT CART ITEMS
     ----------------------------------------------------------------------- */
     const removeIds = items.map((i) => i.id);
 
     await client.query(
       `
         DELETE FROM cart_items
-         WHERE user_id = $1
-           AND id = ANY($2::uuid[])
+        WHERE user_id = $1
+          AND id = ANY($2::uuid[])
       `,
       [userId, removeIds]
     );
@@ -204,7 +244,7 @@ export const checkoutBuild = async (req, res) => {
     const expanded = await Builder.expandComponents(build.components || {});
 
     const totalPrice = Object.values(expanded)
-      .filter((c) => c && typeof c === "object" && c.price !== undefined)
+      .filter((c) => c?.price !== undefined)
       .reduce((sum, comp) => sum + Number(comp.price || 0), 0);
 
     const items = [

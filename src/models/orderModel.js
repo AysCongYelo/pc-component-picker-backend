@@ -2,29 +2,26 @@
 // -----------------------------------------------------------------------------
 // ORDER MODEL
 // Handles:
-// - Safe transactional order creation
+// - Transactional order creation
 // - Stock validation + deduction
-// - Fetching orders for user and admin
+// - Fetching orders for user/admin
 // - Order status updates
 // -----------------------------------------------------------------------------
 
 import pool from "../db.js";
+import * as Builder from "../models/builderModel.js";
 
 // -----------------------------------------------------------------------------
-// ORDER — CREATE WITH TRANSACTION
+// ORDER — CREATE WITH TRANSACTION (used by checkoutBuild)
 // -----------------------------------------------------------------------------
 
 /**
- * Creates a new order inside a SQL transaction.
- * Handles:
- *  - Stock locking (FOR UPDATE)
- *  - Validation
- *  - Order + order_items insertion
- *  - Stock deduction
+ * Creates a new order for a SAVED BUILD checkout.
+ * Inserts ONLY internal bundle components.
  */
 export const createOrderTransaction = async ({
   userId,
-  items, // [{ component_id, qty, price_each, category, build_id }]
+  items, // always [{ component_id: null, qty: 1, price_each, category: "build_bundle", build_id }]
   payment_method = "cod",
   notes = null,
 }) => {
@@ -33,30 +30,43 @@ export const createOrderTransaction = async ({
   try {
     await client.query("BEGIN");
 
-    // ---------------------------------------
-    // STOCK VALIDATION (components only)
-    // ---------------------------------------
-    for (const it of items) {
-      if (!it.component_id) continue; // skip bundle builds
+    // Grab first item (this is always the build bundle)
+    const it = items[0];
+    const buildId = it.build_id;
 
+    if (!buildId) {
+      throw new Error("Missing build_id in createOrderTransaction");
+    }
+
+    // Load all internal components inside the saved build
+    const parts = await Builder.getBuildItems(buildId);
+
+    if (!parts || parts.length === 0) {
+      throw new Error("Build has no components");
+    }
+
+    // ---------------------------------------
+    // STOCK VALIDATION
+    // ---------------------------------------
+    for (const bi of parts) {
       const { rows } = await client.query(
         `SELECT stock FROM components WHERE id = $1 FOR UPDATE`,
-        [it.component_id]
+        [bi.component_id]
       );
 
-      if (!rows[0]) throw new Error(`Component not found: ${it.component_id}`);
+      if (!rows[0]) throw new Error(`Component not found: ${bi.component_id}`);
 
       const stock = Number(rows[0].stock || 0);
-      if (stock < it.qty) {
-        throw new Error(`Out of stock: ${it.component_id}`);
+      if (stock < (bi.quantity || 1)) {
+        throw new Error(`Out of stock: ${bi.component_id}`);
       }
     }
 
     // ---------------------------------------
-    // TOTAL PRICE
+    // COMPUTE TOTAL
     // ---------------------------------------
-    const total = items.reduce(
-      (sum, item) => sum + Number(item.price_each) * Number(item.qty),
+    const total = parts.reduce(
+      (sum, bi) => sum + Number(bi.price || bi.price_each || 0),
       0
     );
 
@@ -75,31 +85,42 @@ export const createOrderTransaction = async ({
     const order = orderRows[0];
 
     // ---------------------------------------
-    // INSERT ORDER ITEMS + UPDATE STOCK
+    // INSERT INTERNAL COMPONENT ITEMS
     // ---------------------------------------
-    for (const it of items) {
+    for (const bi of parts) {
       await client.query(
         `
-          INSERT INTO order_items
-            (order_id, component_id, quantity, price_each, category, build_id)
-          VALUES ($1, $2, $3, $4, $5, $6)
+          INSERT INTO order_items (
+            order_id,
+            component_id,
+            quantity,
+            price_each,
+            category,
+            build_id,
+            component_name,
+            component_image,
+            component_category
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         `,
         [
           order.id,
-          it.component_id,
-          it.qty,
-          it.price_each,
-          it.category || null,
-          it.build_id || null,
+          bi.component_id,
+          bi.quantity || 1,
+          bi.price || bi.price_each || 0,
+          bi.category || bi.component_category,
+          buildId,
+          bi.name || bi.component_name || null,
+          bi.image_url || bi.component_image || null,
+          bi.category || bi.component_category || null,
         ]
       );
 
-      if (it.component_id) {
-        await client.query(
-          `UPDATE components SET stock = stock - $1 WHERE id = $2`,
-          [it.qty, it.component_id]
-        );
-      }
+      // Deduct stock
+      await client.query(
+        `UPDATE components SET stock = stock - $1 WHERE id = $2`,
+        [bi.quantity || 1, bi.component_id]
+      );
     }
 
     await client.query("COMMIT");
@@ -113,12 +134,9 @@ export const createOrderTransaction = async ({
 };
 
 // -----------------------------------------------------------------------------
-// ORDER — USER QUERIES
+// USER QUERIES
 // -----------------------------------------------------------------------------
 
-/**
- * Returns all orders belonging to a user.
- */
 export const getUserOrders = async (userId) => {
   const { rows } = await pool.query(
     `
@@ -133,9 +151,6 @@ export const getUserOrders = async (userId) => {
   return rows;
 };
 
-/**
- * Returns a single order if it belongs to the user.
- */
 export const getOrderById = async (userId, id) => {
   const { rows } = await pool.query(
     `
@@ -149,12 +164,28 @@ export const getOrderById = async (userId, id) => {
   return rows[0] || null;
 };
 
-/**
- * Returns items belonging to a specific order.
- */
 export const getOrderItems = async (orderId) => {
   const { rows } = await pool.query(
-    `SELECT * FROM order_items WHERE order_id = $1`,
+    `
+      SELECT 
+        oi.id,
+        oi.order_id,
+        oi.component_id,
+        oi.build_id,
+        oi.quantity,
+        oi.price_each,
+        oi.category,
+        oi.created_at,
+
+        -- For component items
+        c.name AS component_name,
+        c.image_url AS component_image,
+        c.category AS component_category
+      FROM order_items oi
+      LEFT JOIN components c ON c.id = oi.component_id
+      WHERE oi.order_id = $1
+      ORDER BY oi.created_at ASC
+    `,
     [orderId]
   );
 
@@ -162,12 +193,9 @@ export const getOrderItems = async (orderId) => {
 };
 
 // -----------------------------------------------------------------------------
-// ORDER — ADMIN UPDATE
+// ADMIN: UPDATE ORDER STATUS
 // -----------------------------------------------------------------------------
 
-/**
- * Updates the order status (admin only).
- */
 export const updateOrderStatusDB = async (orderId, status) => {
   const valid = [
     "pending",
@@ -178,14 +206,11 @@ export const updateOrderStatusDB = async (orderId, status) => {
     "refunded",
   ];
 
-  // Normalize input (handles: Completed, COMPLETED, " completed ", etc.)
   const normalized = String(status).trim().toLowerCase();
-
   if (!valid.includes(normalized)) {
     throw new Error(`Invalid order status: ${status}`);
   }
 
-  // Auto timestamps based on status
   const timestampFields = {
     paid: "paid_at",
     shipped: "shipped_at",
@@ -194,9 +219,8 @@ export const updateOrderStatusDB = async (orderId, status) => {
     refunded: "refunded_at",
   };
 
-  let timestampColumn = timestampFields[normalized] || null;
+  const timestampColumn = timestampFields[normalized] || null;
 
-  // Build dynamic SQL SET fields
   const setParts = [`status = $1`, `updated_at = NOW()`];
 
   if (timestampColumn) {
@@ -211,6 +235,5 @@ export const updateOrderStatusDB = async (orderId, status) => {
   `;
 
   const { rows } = await pool.query(sql, [normalized, orderId]);
-
   return rows[0];
 };

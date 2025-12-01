@@ -337,10 +337,9 @@ export const getFullBuildById = async (buildId, userId) => {
   return rows[0] || null;
 };
 // -----------------------------------------------------------------------------
-// BUILD ITEM EXPANSION FOR CHECKOUT (used in cart checkout)
+// BUILD ITEM EXPANSION FOR CHECKOUT (used in cart checkout & order summary)
 // -----------------------------------------------------------------------------
 export const getBuildItems = async (buildId) => {
-  // 1. Fetch the raw JSON components from saved build
   const { rows } = await pool.query(
     `SELECT components FROM user_builds WHERE id = $1 LIMIT 1`,
     [buildId]
@@ -349,17 +348,32 @@ export const getBuildItems = async (buildId) => {
   const comps = rows[0]?.components;
   if (!comps) return [];
 
-  // 2. Expand using your existing logic
+  // Expand using existing logic
   const expanded = await expandComponents(comps, false);
 
-  // 3. Convert expanded object → array of clean items
+  // Convert expanded object → array of COMPLETE items
   return Object.entries(expanded)
-    .filter(([key, comp]) => key !== "__source_build_id" && comp && comp.id)
+    .filter(
+      ([key, comp]) =>
+        key !== "__source_build_id" &&
+        comp &&
+        comp.id &&
+        comp.name &&
+        comp.price !== undefined
+    )
     .map(([key, comp]) => ({
       component_id: comp.id,
       name: comp.name,
       price: Number(comp.price || 0),
-      quantity: 1, // ✔ saved builds always 1 per category
+      price_each: Number(comp.price || 0),
+      quantity: 1,
+
+      // Correct category mapping
       category: key,
+      component_category: key,
+
+      // IMPORTANT: image for frontend display
+      image_url: comp.image_url || null,
+      component_image: comp.image_url || null,
     }));
 };
