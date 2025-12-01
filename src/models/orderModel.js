@@ -177,10 +177,10 @@ export const getOrderItems = async (orderId) => {
         oi.category,
         oi.created_at,
 
-        -- For component items
-        c.name AS component_name,
-        c.image_url AS component_image,
-        c.category AS component_category
+        COALESCE(oi.component_name, c.name) AS component_name,
+        COALESCE(oi.component_image, c.image_url) AS component_image,
+        COALESCE(oi.component_category, c.category) AS component_category
+
       FROM order_items oi
       LEFT JOIN components c ON c.id = oi.component_id
       WHERE oi.order_id = $1
