@@ -169,20 +169,48 @@ export const getOrderItems = async (orderId) => {
  * Updates the order status (admin only).
  */
 export const updateOrderStatusDB = async (orderId, status) => {
-  const valid = ["pending", "paid", "shipped", "cancelled", "refunded"];
-  if (!valid.includes(status)) {
-    throw new Error("Invalid order status");
+  const valid = [
+    "pending",
+    "paid",
+    "shipped",
+    "completed",
+    "cancelled",
+    "refunded",
+  ];
+
+  // Normalize input (handles: Completed, COMPLETED, " completed ", etc.)
+  const normalized = String(status).trim().toLowerCase();
+
+  if (!valid.includes(normalized)) {
+    throw new Error(`Invalid order status: ${status}`);
   }
 
-  const { rows } = await pool.query(
-    `
-      UPDATE orders
-      SET status = $1, updated_at = NOW()
-      WHERE id = $2
-      RETURNING *
-    `,
-    [status, orderId]
-  );
+  // Auto timestamps based on status
+  const timestampFields = {
+    paid: "paid_at",
+    shipped: "shipped_at",
+    completed: "completed_at",
+    cancelled: "cancelled_at",
+    refunded: "refunded_at",
+  };
+
+  let timestampColumn = timestampFields[normalized] || null;
+
+  // Build dynamic SQL SET fields
+  const setParts = [`status = $1`, `updated_at = NOW()`];
+
+  if (timestampColumn) {
+    setParts.push(`${timestampColumn} = NOW()`);
+  }
+
+  const sql = `
+    UPDATE orders
+    SET ${setParts.join(", ")}
+    WHERE id = $2
+    RETURNING *
+  `;
+
+  const { rows } = await pool.query(sql, [normalized, orderId]);
 
   return rows[0];
 };
