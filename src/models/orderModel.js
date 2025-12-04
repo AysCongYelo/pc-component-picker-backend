@@ -169,10 +169,10 @@ export const getOrderItems = async (orderId) => {
         oi.category,
         oi.created_at,
 
-        -- Prefer saved snapshot, fallback to component table
+        -- Use saved snapshot (do NOT fallback to invalid c.category)
         COALESCE(oi.component_name, c.name) AS component_name,
         COALESCE(oi.component_image, c.image_url) AS component_image,
-        COALESCE(oi.component_category, c.category) AS component_category
+        oi.component_category AS component_category
 
       FROM order_items oi
       LEFT JOIN components c ON c.id = oi.component_id

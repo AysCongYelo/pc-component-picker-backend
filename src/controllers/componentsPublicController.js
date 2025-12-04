@@ -65,6 +65,7 @@ export async function publicListComponents(req, res) {
 
       results.push({
         ...comp,
+        category: CATEGORY_MAP[comp.category_id] || null, // <-- ADD THIS
         specs,
       });
     }
@@ -112,7 +113,11 @@ export async function publicGetComponent(req, res) {
 
     return res.json({
       success: true,
-      data: { ...comp, specs },
+      data: {
+        ...comp,
+        category: CATEGORY_MAP[comp.category_id] || null, // <-- ADD THIS
+        specs,
+      },
     });
   } catch (err) {
     console.error("publicGetComponent ERROR:", err.message);
@@ -185,6 +190,7 @@ export async function publicGetTrending(req, res) {
 
       results.push({
         ...comp,
+        category: CATEGORY_MAP[comp.category_id] || null, // <-- ADD THIS
         specs,
       });
     }

@@ -182,6 +182,9 @@ export const checkComponentAgainstBuild = (build, category, comp) => {
     const mbForm = norm(get(mb, "form_factor"));
     const supported = normArray(comp.specs?.form_factor_support || []);
 
+    // FIX: allow if missing info
+    if (!supported.length || !mbForm) return { ok: true };
+
     if (mbForm && supported.length && !supported.includes(mbForm)) {
       return {
         ok: false,
@@ -193,6 +196,9 @@ export const checkComponentAgainstBuild = (build, category, comp) => {
   if (category === "motherboard" && casing) {
     const mbForm = norm(get(comp, "form_factor"));
     const supported = normArray(casing.specs?.form_factor_support || []);
+
+    // FIX: allow if missing info
+    if (!supported.length || !mbForm) return { ok: true };
 
     if (mbForm && supported.length && !supported.includes(mbForm)) {
       return {
@@ -208,6 +214,11 @@ export const checkComponentAgainstBuild = (build, category, comp) => {
     const support = normArray(mb.specs?.storage_support || []);
     const nvmeSlots = n(mb.specs?.nvme_slots || mb.specs?.m2_slots || 0);
     const sataPorts = n(mb.specs?.sata_ports || 0);
+
+    // FIX: if motherboard has NO info → auto allow storage
+    if (!support.length && nvmeSlots === 0 && sataPorts === 0) {
+      return { ok: true };
+    }
 
     // If NVMe / M.2 interface requested, ensure mobo advertises NVMe/M.2 support AND at least 1 slot
     if (

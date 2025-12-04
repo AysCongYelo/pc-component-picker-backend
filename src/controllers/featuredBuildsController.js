@@ -28,14 +28,20 @@ async function uploadImage(file) {
     image_url: data.publicUrl,
     image_path: path,
   };
-}
-
-/** Compute total price */
+} /** Compute total price */
 async function computeTotal(buildId) {
-  const { data: items } = await supabase
+  const { data: items, error } = await supabase
     .from("featured_build_items")
-    .select("component_id, quantity, components ( price )")
+    .select(
+      `
+      component_id,
+      quantity,
+      components ( price )
+    `
+    )
     .eq("build_id", buildId);
+
+  if (error) throw error;
 
   if (!items || items.length === 0) return 0;
 
@@ -47,12 +53,55 @@ async function computeTotal(buildId) {
 
 /** Expand items */
 async function expandItems(buildId) {
-  const { data: items } = await supabase
+  const { data: items, error } = await supabase
     .from("featured_build_items")
-    .select("id, quantity, components (*)")
+    .select(
+      `
+      id,
+      component_id,
+      quantity,
+      components (*)
+    `
+    )
     .eq("build_id", buildId);
 
+  if (error) throw error;
   return items || [];
+}
+
+/** Compute total wattage */
+async function computeWattage(buildId) {
+  const { data: items, error } = await supabase
+    .from("featured_build_items")
+    .select(
+      `
+      quantity,
+      components (
+        wattage,
+        specs
+      )
+    `
+    )
+    .eq("build_id", buildId);
+
+  if (error) throw error;
+  if (!items || items.length === 0) return 0;
+
+  return items.reduce((sum, item) => {
+    const c = item.components || {};
+    const specs = c.specs || {};
+
+    const watt =
+      c.wattage || // COLUMN wattage (PSU, GPU if set)
+      specs.tdp || // JSON CPU TDP
+      specs.TDP ||
+      specs.power_draw ||
+      specs.wattage ||
+      specs.Wattage ||
+      0;
+
+    return sum + watt * (item.quantity || 1);
+  }, 0);
 }
 
 /* ============================================================================ 
@@ -63,7 +112,10 @@ export const getFeaturedBuildsPublic = async (req, res) => {
   try {
     const { data: builds, error } = await supabase
       .from("featured_builds")
-      .select("id, title, description, image_url, total_price, created_at")
+      .select(
+        "id, title, description, image_url, total_price, total_wattage, created_at"
+      )
+
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -227,10 +279,14 @@ export const adminSetFeaturedItems = async (req, res) => {
     }
 
     const total = await computeTotal(id);
+    const wattage = await computeWattage(id);
 
     await supabase
       .from("featured_builds")
-      .update({ total_price: total })
+      .update({
+        total_price: total,
+        total_wattage: wattage,
+      })
       .eq("id", id);
 
     const expanded = await expandItems(id);
@@ -238,6 +294,7 @@ export const adminSetFeaturedItems = async (req, res) => {
     return res.json({
       success: true,
       total_price: total,
+      total_wattage: wattage,
       items: expanded,
     });
   } catch (err) {

@@ -74,18 +74,27 @@ export const getComponentsWithSpecs = async (slug) => {
 
   if (!catRows[0]) return [];
 
-  const { rows: comps } = await pool.query(
-    `SELECT * FROM components WHERE category_id = $1 ORDER BY price ASC`,
-    [catRows[0].id]
+  const categoryId = catRows[0].id;
+  const specTable = `${slug}_specs`;
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        c.*,
+        to_jsonb(s) AS specs
+      FROM components c
+      LEFT JOIN ${specTable} s ON s.component_id = c.id
+      WHERE c.category_id = $1
+      ORDER BY c.price ASC
+    `,
+    [categoryId]
   );
 
-  return Promise.all(
-    comps.map(async (c) => ({
-      ...c,
-      specs: await getSpecsForComponent(c.id),
-      category: slug,
-    }))
-  );
+  return rows.map((c) => ({
+    ...c,
+    category: slug,
+    specs: c.specs || {},
+  }));
 };
 
 // -----------------------------------------------------------------------------
@@ -131,41 +140,18 @@ export const expandComponents = async (
   for (const [category, id] of Object.entries(components)) {
     if (category === "__source_build_id") continue;
 
-    // If null — TEMP build = show placeholder; SAVED build = skip
-    if (!id) {
-      if (allowMissing) {
-        expanded[category] = {
-          id: null,
-          name: "Missing Component",
-          price: 0,
-          image_url: null,
-          category,
-          specs: {},
-        };
-      }
-      continue;
-    }
+    // ❗ FIX 1: Just skip null or missing id
+    if (!id) continue;
 
     const comp = await getComponentWithSpecsById(id);
 
-    // If database missing — TEMP = placeholder, SAVED = skip
+    // ❗ FIX 2: If component not found in DB → skip
     if (!comp) {
       console.warn(`⚠ Missing component → id: ${id} (category: ${category})`);
-
-      if (allowMissing) {
-        expanded[category] = {
-          id,
-          name: "Missing Component",
-          price: 0,
-          image_url: null,
-          category,
-          specs: {},
-        };
-      }
       continue;
     }
 
-    // Normal component
+    // Normal valid component
     expanded[category] = { ...comp, category };
   }
 
@@ -376,4 +362,43 @@ export const getBuildItems = async (buildId) => {
       image_url: comp.image_url || null,
       component_image: comp.image_url || null,
     }));
+};
+export const getFeaturedBuildItems = async (buildId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT 
+        fbi.component_id,
+        fbi.quantity,
+        c.name AS component_name,
+        c.image_url AS component_image,
+        c.price AS price_each,
+        cat.slug AS component_category,
+        c.wattage
+      FROM featured_build_items fbi
+      LEFT JOIN components c ON c.id = fbi.component_id
+      LEFT JOIN categories cat ON cat.id = c.category_id
+      WHERE fbi.build_id = $1
+      ORDER BY cat.slug ASC
+    `,
+    [buildId]
+  );
+
+  return rows.map((i) => ({
+    component_id: i.component_id,
+    name: i.component_name,
+    price_each: Number(i.price_each || 0),
+    price: Number(i.price_each || 0),
+    quantity: i.quantity || 1,
+
+    // images
+    component_image: i.component_image,
+    image_url: i.component_image,
+
+    // category (correct slug)
+    category: i.component_category,
+    component_category: i.component_category,
+
+    // optional: wattage for PSU calc
+    wattage: i.wattage || 0,
+  }));
 };

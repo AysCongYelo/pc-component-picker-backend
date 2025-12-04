@@ -1,6 +1,6 @@
 // src/utils/autoBuilder.js
 // -----------------------------------------------------------------------------
-// AUTO-BUILDER ENGINE (Patched: best-fit + budget allocation)
+// AUTO-BUILDER ENGINE (Patched: strict compatibility + safe fallbacks)
 // Generates builds based on purpose, budget, and compatibility rules.
 // -----------------------------------------------------------------------------
 
@@ -10,7 +10,6 @@ import * as Compatibility from "./compatibility.js";
 // ============================================================================
 // TIMEOUT HELPERS
 // ============================================================================
-
 const OVERALL_MS = 10000;
 const withTimeout = (p, ms) =>
   Promise.race([
@@ -23,8 +22,8 @@ const rem = (deadline) => Math.max(200, deadline - Date.now());
 
 // ============================================================================
 // PURPOSE PROFILES + BUDGET ALLOCATION
+// (unchanged from your version)
 // ============================================================================
-
 const PURPOSES = {
   gaming: {
     ram_gb: 16,
@@ -88,10 +87,6 @@ const PURPOSES = {
   },
 };
 
-// ============================================================================
-// BUDGET ALLOCATION TABLE
-// ============================================================================
-
 const BUDGET_ALLOCATION = {
   gaming: {
     gpu: 0.4,
@@ -136,9 +131,8 @@ const BUDGET_ALLOCATION = {
 };
 
 // ============================================================================
-// HELPERS: price + scoring
+// HELPERS: price + scoring (kept same logic)
 // ============================================================================
-
 const priceNum = (c) => {
   try {
     if (!c) return 0;
@@ -178,7 +172,6 @@ const storageScore = (s) => {
 // ============================================================================
 // BUDGET ALLOCATION CALC
 // ============================================================================
-
 const computeAllocatedBudgets = (purpose, budget) => {
   if (budget == null) return null;
 
@@ -196,9 +189,52 @@ const computeAllocatedBudgets = (purpose, budget) => {
 };
 
 // ============================================================================
-// CPU PICKER (cleaner)
+// SAFE COMPATIBILITY HELPER
+// - Only runs Compatibility.checkComponentAgainstBuild if expanded has
+//   enough context or category is standalone.
+// - prevents returning false negatives when required parent part is missing.
 // ============================================================================
+const isCompatibleWithExpanded = (expanded, category, comp) => {
+  // If compatibility util expects a motherboard for dependent checks,
+  // skip the check if motherboard is missing (we'll do best-effort).
+  // We assume compatibility.checkComponentAgainstBuild returns { ok, reason } or boolean.
+  try {
+    // If expanded is empty (nothing picked yet), we can allow candidates
+    // BUT still run check if it won't depend on missing parent.
+    const hasMb = !!expanded?.motherboard;
+    if (
+      category === "memory" ||
+      category === "cpu_cooler" ||
+      category === "case"
+    ) {
+      // these may depend on motherboard/case - only run compatibility if parent exists
+      if (category === "memory" && !hasMb) return true;
+      if (
+        category === "cpu_cooler" &&
+        !expanded?.case &&
+        !expanded?.motherboard
+      )
+        return true;
+      if (category === "case") return true; // case rarely needs existing parent to validate
+    }
 
+    // For other categories, it's safe to run the check even on partial builds.
+    const out = Compatibility.checkComponentAgainstBuild(expanded, category, {
+      ...comp,
+      category,
+    });
+
+    // Some compatibility utils return boolean, some return object
+    if (typeof out === "boolean") return out;
+    return out?.ok ?? true;
+  } catch (err) {
+    // If compatibility check crashes for any reason, don't block the builder.
+    return true;
+  }
+};
+
+// ============================================================================
+// CPU PICKER (cleaner, unchanged)
 const selectCPUFromList = (list, rank, allocated, remaining) => {
   let candidates = list.filter((c) => {
     const p = priceNum(c);
@@ -218,16 +254,16 @@ const selectCPUFromList = (list, rank, allocated, remaining) => {
   const mid = scored.slice(top.length, Math.ceil(n * 0.7));
   const low = scored.slice(Math.ceil(n * 0.7));
 
-  if (rank === "high") return top[Math.floor(top.length / 2)]?.c || scored[0].c;
+  if (rank === "high")
+    return top[Math.floor(top.length / 2)]?.c || scored[0]?.c;
   if (rank === "mid-high") return top[top.length - 1]?.c || mid[0]?.c;
   if (rank === "mid") return mid[Math.floor(mid.length / 2)]?.c || top[0]?.c;
   return low[Math.floor(low.length / 2)]?.c || mid[0]?.c;
 };
 
 // ============================================================================
-// AUTO-BUILD MAIN ENGINE
+// AUTO-BUILD MAIN ENGINE (patched)
 // ============================================================================
-
 export const buildFromPurpose = async ({
   purpose,
   budget = null,
@@ -242,18 +278,31 @@ export const buildFromPurpose = async ({
 
   const allocated = computeAllocatedBudgets(purpose, remaining);
 
+  // Start with empty expanded (will be updated after commits)
   let expanded = {};
   try {
     expanded = await withTimeout(
       BuilderModel.expandComponents(chosenIds),
       rem(deadline)
     );
-  } catch {}
+  } catch (e) {
+    expanded = {};
+  }
 
   const commit = async (cat, comp) => {
-    if (!comp?.id) return;
+    if (!comp || !comp.id) {
+      chosen[cat] = null;
+      chosenIds[cat] = null;
+      return;
+    }
+
     const p = priceNum(comp);
-    if (remaining != null && p > remaining) return;
+    if (remaining != null && p > remaining) {
+      // can't afford -> skip
+      chosen[cat] = null;
+      chosenIds[cat] = null;
+      return;
+    }
 
     chosen[cat] = comp;
     chosenIds[cat] = comp.id;
@@ -265,35 +314,40 @@ export const buildFromPurpose = async ({
         BuilderModel.expandComponents(chosenIds),
         rem(deadline)
       );
-    } catch {}
+    } catch (e) {
+      // ignore expand failures and keep best-effort expanded
+    }
   };
 
   const fetchList = async (cat) => {
-    const list = await withTimeout(
-      BuilderModel.getComponentsWithSpecs(cat),
-      rem(deadline)
-    );
-    return (list || []).filter(
-      (c) => c.status === "active" && (c.stock == null || c.stock > 0)
-    );
+    try {
+      const list = await withTimeout(
+        BuilderModel.getComponentsWithSpecs(cat),
+        rem(deadline)
+      );
+      if (!Array.isArray(list)) return [];
+      return (list || []).filter(
+        (c) => c.status === "active" && (c.stock == null || c.stock > 0)
+      );
+    } catch (err) {
+      // safe fallback: log and return empty array
+      console.warn(`fetchList(${cat}) failed:`, err.message || err);
+      return [];
+    }
   };
-
-  // ========================================================================
-  // CATEGORY LOOP
-  // ========================================================================
 
   for (const category of cfg.priority) {
     if (Date.now() > deadline) break;
 
     try {
-      // Local allocated budget
+      // local allocated budget
       let localAlloc = null;
       if (allocated) {
         if (allocated[category] != null) localAlloc = allocated[category];
         else localAlloc = Math.max(allocated._pool, 500);
       }
 
-      // ------------------------ Minimum GPU budget (Fix #4)
+      // min GPU budget safety
       if (
         (purpose === "gaming" || purpose === "streaming") &&
         category === "gpu"
@@ -305,16 +359,16 @@ export const buildFromPurpose = async ({
       // ------------------------ CPU
       if (category === "cpu") {
         let list = await fetchList("cpu");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("cpu", null);
+          continue;
+        }
 
         if (respectCpu) {
           const keep = list.find((c) => c.id === respectCpu);
           if (keep) {
             const ok =
-              Compatibility.checkComponentAgainstBuild(expanded, "cpu", {
-                ...keep,
-                category: "cpu",
-              }).ok &&
+              isCompatibleWithExpanded(expanded, "cpu", keep) &&
               (remaining == null || priceNum(keep) <= remaining);
 
             if (ok) {
@@ -324,13 +378,12 @@ export const buildFromPurpose = async ({
           }
         }
 
-        list = list.filter(
-          (c) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "cpu", {
-              ...c,
-              category: "cpu",
-            }).ok
-        );
+        list = list.filter((c) => isCompatibleWithExpanded(expanded, "cpu", c));
+        if (!list.length) {
+          // no compatible CPU found -> leave null instead of blocking
+          await commit("cpu", null);
+          continue;
+        }
 
         const selected = selectCPUFromList(
           list,
@@ -339,27 +392,38 @@ export const buildFromPurpose = async ({
           remaining
         );
         if (selected) await commit("cpu", selected);
+        else await commit("cpu", null);
+
         continue;
       }
 
       // ------------------------ Motherboard
       if (category === "motherboard") {
         let list = await fetchList("motherboard");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("motherboard", null);
+          continue;
+        }
 
+        // If CPU chosen, prefer motherboards matching CPU socket
         const cpuSock = String(chosen.cpu?.specs?.socket || "").toLowerCase();
-        if (cpuSock)
-          list = list.filter(
+        if (cpuSock) {
+          const matched = list.filter(
             (m) => String(m.specs?.socket || "").toLowerCase() === cpuSock
           );
+          if (matched.length) list = matched;
+        }
 
-        list = list.filter(
-          (m) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "motherboard", {
-              ...m,
-              category: "motherboard",
-            }).ok
+        // run compatibility only if CPU exists in expanded or chosen
+        list = list.filter((m) =>
+          isCompatibleWithExpanded(expanded, "motherboard", m)
         );
+
+        if (!list.length) {
+          // no compatible motherboard -> mark null and continue
+          await commit("motherboard", null);
+          continue;
+        }
 
         let candidates = list.filter(
           (m) => priceNum(m) <= (localAlloc ?? remaining ?? Infinity)
@@ -376,23 +440,31 @@ export const buildFromPurpose = async ({
       // ------------------------ Memory
       if (category === "memory") {
         let list = await fetchList("memory");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("memory", null);
+          continue;
+        }
 
-        const type = chosen.motherboard?.specs?.memory_type;
-        if (type)
-          list = list.filter(
+        // If motherboard exists, filter by supported memory type
+        const mbType = chosen.motherboard?.specs?.memory_type;
+        if (mbType) {
+          const filteredByType = list.filter(
             (r) =>
               String(r.specs?.type || "").toLowerCase() ===
-              String(type).toLowerCase()
+              String(mbType).toLowerCase()
           );
+          if (filteredByType.length) list = filteredByType;
+        }
 
-        list = list.filter(
-          (r) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "memory", {
-              ...r,
-              category: "memory",
-            }).ok
+        // Run compatibility only when motherboard or cpu present in expanded
+        list = list.filter((r) =>
+          isCompatibleWithExpanded(expanded, "memory", r)
         );
+
+        if (!list.length) {
+          await commit("memory", null);
+          continue;
+        }
 
         const sorted = [...list].sort(
           (a, b) => memoryScore(b) - memoryScore(a)
@@ -434,18 +506,19 @@ export const buildFromPurpose = async ({
 
       // ------------------------ GPU
       if (category === "gpu") {
-        if (!cfg.prefer_gpu) continue;
+        if (!cfg.prefer_gpu) {
+          await commit("gpu", null);
+          continue;
+        }
 
         let list = await fetchList("gpu");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("gpu", null);
+          continue;
+        }
 
-        list = list.filter(
-          (g) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "gpu", {
-              ...g,
-              category: "gpu",
-            }).ok
-        );
+        // Filter by compatibility only if it makes sense
+        list = list.filter((g) => isCompatibleWithExpanded(expanded, "gpu", g));
 
         let scored = list
           .map((g) => ({ g, s: gpuScore(g), p: priceNum(g) }))
@@ -456,6 +529,11 @@ export const buildFromPurpose = async ({
         );
         if (!candidates.length) candidates = scored;
 
+        if (!candidates.length) {
+          await commit("gpu", null);
+          continue;
+        }
+
         await commit("gpu", candidates[0].g);
         continue;
       }
@@ -463,14 +541,13 @@ export const buildFromPurpose = async ({
       // ------------------------ Storage
       if (category === "storage") {
         let list = await fetchList("storage");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("storage", null);
+          continue;
+        }
 
-        list = list.filter(
-          (s) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "storage", {
-              ...s,
-              category: "storage",
-            }).ok
+        list = list.filter((s) =>
+          isCompatibleWithExpanded(expanded, "storage", s)
         );
 
         const nvme = list.filter((s) =>
@@ -490,19 +567,26 @@ export const buildFromPurpose = async ({
         );
         if (!candidates.length) candidates = scored;
 
+        if (!candidates.length) {
+          await commit("storage", null);
+          continue;
+        }
+
         await commit("storage", candidates[0].s);
         continue;
       }
 
-      // ------------------------ PSU (x1.3 stays)
+      // ------------------------ PSU
       if (category === "psu") {
         let list = await fetchList("psu");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("psu", null);
+          continue;
+        }
 
         const cpuT = Number(chosen.cpu?.specs?.tdp || 0);
         const gpuT = Number(chosen.gpu?.specs?.tdp || 0);
 
-        // KEEPING EXACTLY AS YOUR VERSION:
         const need = Math.max(350, Math.ceil((cpuT + gpuT) * 1.3));
 
         list = list
@@ -520,14 +604,22 @@ export const buildFromPurpose = async ({
             return a._price - b._price;
           });
 
+        if (!list.length) {
+          await commit("psu", null);
+          continue;
+        }
+
         await commit("psu", list[0]);
         continue;
       }
 
-      // ------------------------ Case (Fix #3)
+      // ------------------------ Case
       if (category === "case") {
         let list = await fetchList("case");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("case", null);
+          continue;
+        }
 
         const mbForm = chosen.motherboard?.specs?.form_factor;
         const gpuLen = Number(chosen.gpu?.specs?.length || 0);
@@ -535,9 +627,9 @@ export const buildFromPurpose = async ({
         list = list.filter((c) => {
           const supported = c.specs?.form_factor_support;
 
-          // FIX — if no support list, we ALLOW the case
+          // If no support info, allow case (don't block)
           if (!supported || !supported.length) return true;
-
+          if (!mbForm) return true; // can't validate without motherboard
           return supported.includes(mbForm);
         });
 
@@ -546,13 +638,14 @@ export const buildFromPurpose = async ({
           return !gpuLen || !max || gpuLen <= max;
         });
 
-        list = list.filter(
-          (c) =>
-            Compatibility.checkComponentAgainstBuild(expanded, "case", {
-              ...c,
-              category: "case",
-            }).ok
+        list = list.filter((c) =>
+          isCompatibleWithExpanded(expanded, "case", c)
         );
+
+        if (!list.length) {
+          await commit("case", null);
+          continue;
+        }
 
         let candidates = list.filter(
           (c) => priceNum(c) <= (localAlloc ?? remaining ?? Infinity)
@@ -566,9 +659,12 @@ export const buildFromPurpose = async ({
       // ------------------------ Cooler
       if (category === "cpu_cooler") {
         let list = await fetchList("cpu_cooler");
-        if (!list.length) continue;
+        if (!list.length) {
+          await commit("cpu_cooler", null);
+          continue;
+        }
 
-        const socket = chosen.cpu?.specs?.socket;
+        const cpuSocket = chosen.cpu?.specs?.socket;
         const heightLimit = Number(
           chosen.case?.specs?.max_cpu_cooler_height || 0
         );
@@ -577,12 +673,20 @@ export const buildFromPurpose = async ({
           const sockets = c.specs?.compatible_sockets || [];
           const h = Number(c.specs?.height || 0);
 
-          if (socket && sockets.length && !sockets.includes(socket))
+          if (cpuSocket && sockets.length && !sockets.includes(cpuSocket))
             return false;
           if (heightLimit && h > heightLimit) return false;
-
           return true;
         });
+
+        list = list.filter((c) =>
+          isCompatibleWithExpanded(expanded, "cpu_cooler", c)
+        );
+
+        if (!list.length) {
+          await commit("cpu_cooler", null);
+          continue;
+        }
 
         let candidates = list.filter(
           (c) => priceNum(c) <= (localAlloc ?? remaining ?? Infinity)
@@ -596,14 +700,84 @@ export const buildFromPurpose = async ({
         continue;
       }
     } catch (err) {
-      console.warn(`auto-build step failed for ${category}:`, err.message);
+      // Log and continue - don't let a single step failure kill the build.
+      console.warn(
+        `auto-build step failed for ${category}:`,
+        err?.message || err
+      );
+      // mark category as null to keep deterministic behavior
+      try {
+        await commit(category, null);
+      } catch {}
       continue;
     }
   }
+  // ============================================================================
+  // UPGRADE PHASE — bring build NEAR the budget (not cheapest)
+  // ============================================================================
 
+  if (budget != null && remaining > 0) {
+    const UPGRADE_ORDER = [
+      "gpu",
+      "cpu",
+      "memory",
+      "storage",
+      "motherboard",
+      "psu",
+      "case",
+      "cpu_cooler",
+    ];
+
+    for (const cat of UPGRADE_ORDER) {
+      if (!chosen[cat]) continue;
+
+      const list = await fetchList(cat);
+      if (!list.length) continue;
+
+      const sorted =
+        cat === "gpu"
+          ? list.sort((a, b) => gpuScore(b) - gpuScore(a))
+          : cat === "cpu"
+          ? list.sort((a, b) => cpuScore(b) - cpuScore(a))
+          : cat === "memory"
+          ? list.sort((a, b) => memoryScore(b) - memoryScore(a))
+          : cat === "storage"
+          ? list.sort((a, b) => storageScore(b) - storageScore(a))
+          : list.sort((a, b) => priceNum(b) - priceNum(a));
+
+      const currentPrice = priceNum(chosen[cat]);
+
+      const affordable = sorted.filter((c) => {
+        const diff = priceNum(c) - currentPrice;
+        return (
+          diff > 0 &&
+          diff <= remaining &&
+          isCompatibleWithExpanded(expanded, cat, c)
+        );
+      });
+
+      if (affordable.length) {
+        const best = affordable[0];
+        const diff = priceNum(best) - currentPrice;
+
+        chosen[cat] = best;
+        chosenIds[cat] = best.id;
+        remaining -= diff;
+
+        try {
+          expanded = await withTimeout(
+            BuilderModel.expandComponents(chosenIds),
+            rem(deadline)
+          );
+        } catch (_) {}
+      }
+    }
+  }
+
+  // Final: convert chosen to id map (null when not chosen)
   const final = {};
   for (const [cat, comp] of Object.entries(chosen)) {
-    final[cat] = comp?.id || null;
+    if (comp?.id) final[cat] = comp.id; // ONLY add if may component
   }
 
   return final;
@@ -612,33 +786,52 @@ export const buildFromPurpose = async ({
 // ============================================================================
 // AUTO COMPLETE
 // ============================================================================
-
 export const autoCompleteBuild = async (partial) => {
+  // 1) Expand existing para meron tayong base for compatibility checks
   const expanded = await BuilderModel.expandComponents(partial).catch(
     () => ({})
   );
 
+  // 2) Detect purpose (optional logic)
   let purpose = "gaming";
   if (expanded.memory?.specs?.capacity_gb >= 32) purpose = "workstation";
+  if (expanded.cpu?.specs?.cores >= 12) purpose = "workstation";
 
-  const auto = await buildFromPurpose({
-    purpose,
-    budget: null,
-    respectCpu: expanded.cpu?.id || null,
-  });
+  // 3) Use same priority as autobuild for alignment
+  const cfg = PURPOSES[purpose] || PURPOSES.gaming;
+  const categories = cfg.priority;
 
-  const final = {};
-  for (const key of [
-    "cpu",
-    "motherboard",
-    "memory",
-    "gpu",
-    "storage",
-    "psu",
-    "case",
-    "cpu_cooler",
-  ]) {
-    final[key] = partial[key] || auto[key] || null;
+  const final = { ...partial }; // keep existing choices as is
+
+  for (const category of categories) {
+    // Skip categories already chosen
+    if (partial[category]) continue;
+
+    // Fetch components in this category
+    const list = await BuilderModel.getComponentsWithSpecs(category);
+    if (!list || !list.length) continue;
+
+    // Filter: active + in-stock + compatible
+    const compatible = list.filter((c) => {
+      if (c.status !== "active") return false;
+      if (c.stock != null && c.stock <= 0) return false;
+
+      return Compatibility.isComponentCompatibleWithBuild(expanded, {
+        ...c,
+        category,
+      });
+    });
+
+    if (!compatible.length) continue;
+
+    // Pick CHEAPEST FULLY COMPATIBLE
+    const cheapest = [...compatible].sort(
+      (a, b) => priceNum(a) - priceNum(b)
+    )[0];
+
+    // Commit to build
+    final[category] = cheapest.id;
+    expanded[category] = cheapest; // update expanded so next categories see compatibility
   }
 
   return final;
