@@ -140,25 +140,31 @@ export const adminGetOrderDetail = async (req, res) => {
     if (error || !order)
       return res.status(404).json({ error: "Order not found" });
 
-    // Fetch all items for this order
+    // Fetch all items for this order (SAFE LEFT JOIN)
     const { data: items, error: itemsErr } = await supabase
       .from("order_items")
       .select(
         `
-    id,
-    order_id,
-    component_id,
-    quantity,
-    price,
-    category,
-    components!left (
-      name,
-      image_url,
-      price,
-      brand,
-      category
-    )
-  `
+        id,
+        order_id,
+        component_id,
+        quantity,
+        price_each,
+        category,
+        build_id,
+        component_name,
+        component_image,
+        component_category,
+        created_at,
+        components!left (
+          id,
+          name,
+          image_url,
+          brand,
+          price,
+          category_id
+        )
+      `
       )
       .eq("order_id", orderId);
 
