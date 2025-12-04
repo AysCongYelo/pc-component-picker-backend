@@ -143,7 +143,23 @@ export const adminGetOrderDetail = async (req, res) => {
     // Fetch all items for this order
     const { data: items, error: itemsErr } = await supabase
       .from("order_items")
-      .select("*")
+      .select(
+        `
+    id,
+    order_id,
+    component_id,
+    quantity,
+    price,
+    category,
+    components:component_id (
+      name,
+      image_url,
+      price,
+      brand,
+      category
+    )
+  `
+      )
       .eq("order_id", orderId);
 
     if (itemsErr) throw itemsErr;
