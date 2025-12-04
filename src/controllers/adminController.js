@@ -151,7 +151,7 @@ export const adminGetOrderDetail = async (req, res) => {
     quantity,
     price,
     category,
-    components:component_id (
+    components!left (
       name,
       image_url,
       price,
