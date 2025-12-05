@@ -17,7 +17,7 @@ import * as Builder from "../models/builderModel.js";
 
 export const createOrderTransaction = async ({
   userId,
-  items, // [{ component_id:null, qty:1, price_each, category:"build_bundle", build_id }]
+  items,
   payment_method = "cod",
   notes = null,
 }) => {
@@ -26,13 +26,12 @@ export const createOrderTransaction = async ({
   try {
     await client.query("BEGIN");
 
-    // Always 1 saved build per checkout
     const it = items[0];
     const buildId = it.build_id;
 
     if (!buildId) throw new Error("Missing build_id");
 
-    // Load all internal components inside saved build
+    // Load internal components of saved build
     const parts = await Builder.getBuildItems(buildId);
     if (!parts || parts.length === 0)
       throw new Error("Build has no components");
@@ -80,51 +79,56 @@ export const createOrderTransaction = async ({
     // INSERT INTERNAL COMPONENT ITEMS
     // ---------------------------------------
     for (const bi of parts) {
-      // 🔥 FIX: Load real component data
       const { rows: compRows } = await client.query(
-        `SELECT name, image_url, category FROM components WHERE id = $1`,
+        `
+          SELECT 
+            c.name, 
+            c.image_url, 
+            cat.slug AS category
+          FROM components c
+          LEFT JOIN categories cat ON cat.id = c.category_id
+          WHERE c.id = $1
+        `,
         [bi.component_id]
       );
+
       const comp = compRows[0] || {};
+
+      const safeCategory = String(bi.category || comp.category || "component");
+      const safeName = String(bi.name || comp.name || "Unnamed Component");
+      const safeImage =
+        bi.image_url || comp.image_url
+          ? String(bi.image_url || comp.image_url)
+          : null;
 
       await client.query(
         `
-      INSERT INTO order_items (
-        order_id,
-        component_id,
-        quantity,
-        price_each,
-        category,
-        build_id,
-        component_name,
-        component_image,
-        component_category
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-    `,
+          INSERT INTO order_items (
+            order_id,
+            component_id,
+            quantity,
+            price_each,
+            category,
+            build_id,
+            component_name,
+            component_image,
+            component_category
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `,
         [
           order.id,
           bi.component_id,
-          bi.quantity || 1,
-          bi.price || bi.price_each || 0,
-
-          // category
-          bi.category || comp.category || null,
-
+          Number(bi.quantity || 1),
+          Number(bi.price || bi.price_each || 0),
+          safeCategory,
           buildId,
-
-          // name
-          bi.name || comp.name || null,
-
-          // image (⭐⭐ FIXED!)
-          bi.image_url || comp.image_url || null,
-
-          // component_category
-          bi.category || comp.category || null,
+          safeName,
+          safeImage,
+          safeCategory,
         ]
       );
 
-      // Deduct stock
       await client.query(
         `UPDATE components SET stock = stock - $1 WHERE id = $2`,
         [bi.quantity || 1, bi.component_id]

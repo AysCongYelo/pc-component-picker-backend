@@ -107,34 +107,21 @@ export const checkout = async (req, res) => {
       const isBundle = item.category === "build_bundle";
 
       /* -------------------------------------------------------------
-   NORMAL COMPONENT ITEMS (FIXED WITH SNAPSHOT FIELDS)
-------------------------------------------------------------- */
+         NORMAL COMPONENT ITEMS
+      ------------------------------------------------------------- */
       if (!isBundle && item.component_id) {
         await client.query(
           `
-      INSERT INTO order_items (
-        order_id,
-        component_id,
-        quantity,
-        price_each,
-        category,
-        component_name,
-        component_image,
-        component_category
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-    `,
+            INSERT INTO order_items
+              (order_id, component_id, quantity, price_each, category)
+            VALUES ($1, $2, $3, $4, $5)
+          `,
           [
             order.id,
             item.component_id,
             Number(item.quantity || 1),
             Number(item.price || 0),
             item.category,
-
-            // SNAPSHOT fields (pulled from item)
-            item.component_name || item.name || null,
-            item.component_image || item.image_url || item.image || null,
-            item.category || item.component_category || null,
           ]
         );
       }
@@ -263,16 +250,10 @@ export const checkoutBuild = async (req, res) => {
     const items = [
       {
         component_id: null,
-        quantity: 1,
+        quantity: 1, // ✅ CORRECT FIELD NAME
         price_each: totalPrice,
-
         category: "build_bundle",
         build_id: build.id,
-
-        // SNAPSHOT FIELDS REQUIRED BY order_items
-        component_name: build.name || "Custom Build",
-        component_image: null,
-        component_category: "build_bundle",
       },
     ];
 
