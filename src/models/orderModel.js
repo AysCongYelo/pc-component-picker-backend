@@ -80,31 +80,47 @@ export const createOrderTransaction = async ({
     // INSERT INTERNAL COMPONENT ITEMS
     // ---------------------------------------
     for (const bi of parts) {
+      // 🔥 FIX: Load real component data
+      const { rows: compRows } = await client.query(
+        `SELECT name, image_url, category FROM components WHERE id = $1`,
+        [bi.component_id]
+      );
+      const comp = compRows[0] || {};
+
       await client.query(
         `
-          INSERT INTO order_items (
-            order_id,
-            component_id,
-            quantity,
-            price_each,
-            category,
-            build_id,
-            component_name,
-            component_image,
-            component_category
-          )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        `,
+      INSERT INTO order_items (
+        order_id,
+        component_id,
+        quantity,
+        price_each,
+        category,
+        build_id,
+        component_name,
+        component_image,
+        component_category
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `,
         [
-          order.id, // order_id
-          bi.component_id, // component_id
-          bi.quantity || 1, // quantity
-          bi.price || bi.price_each || 0, // price_each
-          bi.category || bi.component_category || null, // category
-          buildId, // build_id
-          bi.name || bi.component_name || null, // component_name
-          bi.image_url || bi.component_image || null, // component_image
-          bi.category || bi.component_category || null, // component_category
+          order.id,
+          bi.component_id,
+          bi.quantity || 1,
+          bi.price || bi.price_each || 0,
+
+          // category
+          bi.category || comp.category || null,
+
+          buildId,
+
+          // name
+          bi.name || comp.name || null,
+
+          // image (⭐⭐ FIXED!)
+          bi.image_url || comp.image_url || null,
+
+          // component_category
+          bi.category || comp.category || null,
         ]
       );
 
