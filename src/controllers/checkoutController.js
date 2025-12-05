@@ -263,10 +263,16 @@ export const checkoutBuild = async (req, res) => {
     const items = [
       {
         component_id: null,
-        qty: 1,
+        quantity: 1,
         price_each: totalPrice,
+
         category: "build_bundle",
         build_id: build.id,
+
+        // SNAPSHOT FIELDS REQUIRED BY order_items
+        component_name: build.name || "Custom Build",
+        component_image: null,
+        component_category: "build_bundle",
       },
     ];
 
